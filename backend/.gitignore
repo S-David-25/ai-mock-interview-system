@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+*.db
+*.sqlite3
+uploads/resumes/*
+!uploads/resumes/.gitkeep
+uploads/jds/*
+!uploads/jds/.gitkeep
+.env
+venv/
+env/
