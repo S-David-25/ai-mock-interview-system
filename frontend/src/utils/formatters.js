@@ -5,8 +5,13 @@
 export function formatDate(dateString) {
   if (!dateString) return 'N/A';
   try {
-    const d = new Date(dateString.endsWith('Z') ? dateString : dateString + 'Z');
-    return d.toLocaleDateString('en-US', {
+    let clean = String(dateString).trim().replace(' ', 'T');
+    if (!clean.endsWith('Z') && !clean.includes('+') && !clean.slice(10).includes('-')) {
+      clean += 'Z';
+    }
+    const d = new Date(clean);
+    if (isNaN(d.getTime())) return dateString;
+    return d.toLocaleDateString(undefined, {
       year: 'numeric',
       month: 'short',
       day: 'numeric',
@@ -16,6 +21,19 @@ export function formatDate(dateString) {
   } catch (e) {
     return dateString;
   }
+}
+
+export function formatDuration(seconds) {
+  if (seconds === null || seconds === undefined || isNaN(seconds) || seconds < 0) return '00:00';
+  const totalSec = Math.floor(seconds);
+  const mins = Math.floor(totalSec / 60);
+  const secs = totalSec % 60;
+  if (mins >= 60) {
+    const hrs = Math.floor(mins / 60);
+    const remMins = mins % 60;
+    return `${String(hrs).padStart(2, '0')}:${String(remMins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  }
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
 export function formatScore(score) {

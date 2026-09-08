@@ -147,8 +147,7 @@ async def submit_jd_text(
 ):
     """Submit JD as plain text (pasted into textarea)."""
     interview = await FileService.submit_jd_text(db, interview_id, current_user.id, jd_text, original_name="pasted")
-    # approximate word count
-    word_count = len((jd_text or "").split())
+    word_count = len((interview.jd_text or "").split())
     return FileUploadResponse(
         message="Job Description saved from text input.",
         interview_id=interview.id,
@@ -171,63 +170,48 @@ def get_interview_status(
     message = ""
 
     if interview.interview_type == "general":
-        # For general interviews, require a valid parsed resume (not just file upload)
-        is_ready = False
-        message = "Resume upload required."
+        is_ready = bool(interview.resume_filename or interview.resume_text)
+        message = "Ready to start AI voice interview." if is_ready else "Resume upload required."
         if interview.resume_analysis_json:
             try:
-                ra = interview.resume_analysis_json
                 import json as _json
-                parsed = _json.loads(ra)
+                parsed = _json.loads(interview.resume_analysis_json)
                 if isinstance(parsed, dict) and parsed.get('validation'):
-                    is_valid = parsed['validation'].get('is_valid', False)
-                    if is_valid:
-                        is_ready = True
-                        message = "Ready to start AI voice interview."
-                else:
-                    is_ready = True
-                    message = "Ready to start AI voice interview."
+                    if not parsed['validation'].get('is_valid', True):
+                        is_ready = False
+                        message = "Resume validation failed."
             except Exception:
-                is_ready = False
-                message = "Resume processing incomplete or invalid."
+                pass
     elif interview.interview_type == "company":
-        # For company interviews, require both resume and JD to be validated and parsed
-        is_ready = False
-        message = "Both Resume and Job Description uploads are required."
+        has_resume = bool(interview.resume_filename or interview.resume_text)
+        has_jd = bool(interview.jd_filename or interview.jd_text)
+        is_ready = bool(has_resume and has_jd)
+        message = "Ready to start AI voice interview." if is_ready else "Both Resume and Job Description uploads are required."
         if interview.resume_analysis_json and interview.jd_analysis_json:
             try:
                 import json as _json
                 ra = _json.loads(interview.resume_analysis_json)
                 ja = _json.loads(interview.jd_analysis_json)
-                ra_valid = True
-                ja_valid = True
-                if isinstance(ra, dict) and ra.get('validation'):
-                    ra_valid = ra['validation'].get('is_valid', False)
-                if isinstance(ja, dict) and ja.get('validation'):
-                    ja_valid = ja['validation'].get('is_valid', False)
-                if ra_valid and ja_valid:
-                    is_ready = True
-                    message = "Ready to start AI voice interview."
-                else:
+                if isinstance(ra, dict) and ra.get('validation') and not ra['validation'].get('is_valid', True):
                     is_ready = False
-                    message = "Resume or Job Description failed validation."
+                    message = "Resume validation failed."
+                if isinstance(ja, dict) and ja.get('validation') and not ja['validation'].get('is_valid', True):
+                    is_ready = False
+                    message = "Job description validation failed."
             except Exception:
-                is_ready = False
-                message = "Resume/JD processing incomplete."
-        else:
-            if not interview.resume_filename and not interview.jd_filename:
-                message = "Both Resume and Job Description uploads are required."
-            elif not interview.resume_filename:
-                message = "Resume upload required for this company interview."
-            else:
-                message = "Job Description upload required for this company interview."
+                pass
+
+    if interview.status == "completed":
+        message = "Interview session completed."
+    elif interview.status == "in_progress":
+        message = "Interview session is in progress."
 
     return InterviewStatusResponse(
         id=interview.id,
         status=interview.status,
         interview_type=interview.interview_type,
-        is_resume_uploaded=bool(interview.resume_filename),
-        is_jd_uploaded=bool(interview.jd_filename),
+        is_resume_uploaded=bool(interview.resume_filename or interview.resume_text),
+        is_jd_uploaded=bool(interview.jd_filename or interview.jd_text),
         is_ready=is_ready,
         message=message
     )

@@ -1,5 +1,7 @@
+import asyncio
 import json
 import logging
+from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Any, Tuple
 from fastapi import HTTPException, status
 from app.database.session import DatabaseSession
@@ -35,17 +37,61 @@ from app.services.emotion_service import EmotionRecognitionService
 
 logger = logging.getLogger("interview_service")
 
+def parse_utc_timestamp(ts: Optional[str]) -> Optional[datetime]:
+    """Parses a stored UTC timestamp string into a timezone-aware UTC datetime."""
+    if not ts:
+        return None
+    try:
+        clean = ts.strip().replace(" ", "T")
+        if not clean.endswith("Z") and "+" not in clean and "-" not in clean[10:]:
+            clean += "+00:00"
+        elif clean.endswith("Z"):
+            clean = clean[:-1] + "+00:00"
+        dt = datetime.fromisoformat(clean)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return None
+
 class InterviewService:
     @staticmethod
+    def is_interview_expired(interview: Interview) -> bool:
+        """Determines whether the interview session has exceeded its authoritative expires_at timestamp."""
+        if not interview.expires_at:
+            return False
+        expires_dt = parse_utc_timestamp(interview.expires_at)
+        if not expires_dt:
+            return False
+        return datetime.now(timezone.utc) >= expires_dt
+
+    @staticmethod
+    def check_and_handle_expiry(db: DatabaseSession, interview: Interview) -> bool:
+        """If interview has expired, marks it as completed in database and updates interview object."""
+        if interview.status == "completed":
+            return True
+        if InterviewService.is_interview_expired(interview):
+            if interview.status != "completed":
+                db.execute(
+                    "UPDATE interviews SET status = 'completed', updated_at = datetime('now', 'utc') WHERE id = ?",
+                    (interview.id,)
+                )
+                db.commit()
+                interview.status = "completed"
+            return True
+        return False
+
+    @staticmethod
     def create_interview(db: DatabaseSession, user_id: int, data: InterviewCreate) -> Interview:
+        duration = data.duration_minutes or 30
         cursor = db.execute(
             """
             INSERT INTO interviews (
-                user_id, interview_type, company_name, job_role, status,
+                user_id, interview_type, company_name, job_role, duration_minutes, status,
                 created_at, updated_at
-            ) VALUES (?, ?, ?, ?, 'setup', datetime('now', 'utc'), datetime('now', 'utc'))
+            ) VALUES (?, ?, ?, ?, ?, 'setup', datetime('now', 'utc'), datetime('now', 'utc'))
             """,
-            (user_id, data.interview_type, data.company_name, data.job_role)
+            (user_id, data.interview_type, data.company_name, data.job_role, duration)
         )
         db.commit()
         interview_id = cursor.lastrowid
@@ -63,7 +109,10 @@ class InterviewService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Interview session not found or you do not have permission to access it."
             )
-        return Interview.from_row(row)
+        interview = Interview.from_row(row)
+        if interview.status == "in_progress":
+            InterviewService.check_and_handle_expiry(db, interview)
+        return interview
 
     @staticmethod
     def get_user_interviews(db: DatabaseSession, user_id: int) -> List[Interview]:
@@ -71,7 +120,11 @@ class InterviewService:
             "SELECT * FROM interviews WHERE user_id = ? ORDER BY id DESC",
             (user_id,)
         )
-        return [Interview.from_row(r) for r in rows]
+        interviews = [Interview.from_row(r) for r in rows]
+        for i in interviews:
+            if i.status == "in_progress":
+                InterviewService.check_and_handle_expiry(db, i)
+        return interviews
 
     @staticmethod
     def get_user_interview_stats(db: DatabaseSession, user_id: int) -> InterviewStats:
@@ -115,10 +168,13 @@ class InterviewService:
     @staticmethod
     def evaluate_and_update_status(db: DatabaseSession, interview: Interview) -> str:
         is_ready = False
+        has_resume = bool(interview.resume_filename or interview.resume_text)
+        has_jd = bool(interview.jd_filename or interview.jd_text)
+
         if interview.interview_type == "general":
-            is_ready = bool(interview.resume_filename)
+            is_ready = has_resume
         elif interview.interview_type == "company":
-            is_ready = bool(interview.resume_filename and interview.jd_filename)
+            is_ready = bool(has_resume and has_jd)
 
         new_status = "ready" if is_ready else "setup"
         if interview.status not in ("completed", "in_progress", "ready") or (interview.status == "setup" and is_ready):
@@ -255,7 +311,10 @@ class InterviewService:
             db.commit()
 
             return resume_profile, jd_profile, skill_match, resume_validation, jd_validation, ats_analysis
+        except HTTPException:
+            raise
         except Exception as e:
+            logger.exception("Failed to process documents")
             db.execute("UPDATE interviews SET status = 'failed' WHERE id = ?", (interview.id,))
             db.commit()
             raise HTTPException(
@@ -272,6 +331,7 @@ class InterviewService:
     ) -> List[QuestionSchema]:
         """
         Generates or returns existing personalized interview questions for the session.
+        Generates exactly Question 1 dynamically at session start.
         """
         interview = InterviewService.get_interview_by_id(db, interview_id, user_id)
 
@@ -296,59 +356,67 @@ class InterviewService:
             ]
 
         # If analysis not done yet, run document processing first
-        if not interview.resume_analysis_json:
+        resume_data = json.loads(interview.resume_analysis_json) if interview.resume_analysis_json else None
+        if not resume_data or ("validation" in resume_data and "technical_skills" not in resume_data):
             resume_prof, jd_prof, skill_match, resume_validation, jd_validation, ats_analysis = await InterviewService.process_interview_documents(db, interview_id, user_id)
-            if not resume_validation.get("is_valid"):
-                # Cannot generate questions without a valid resume
+            if not resume_validation or not resume_validation.get("is_valid"):
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Resume validation failed. Please upload a valid resume before generating questions.")
             if interview.interview_type == 'company' and jd_validation and not jd_validation.get('is_valid'):
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Job Description validation failed. Please provide a valid JD before generating questions.")
         else:
-            resume_prof = ResumeProfileSchema(**json.loads(interview.resume_analysis_json))
-            jd_prof = JDProfileSchema(**json.loads(interview.jd_analysis_json)) if interview.jd_analysis_json else None
+            resume_prof = ResumeProfileSchema(**resume_data)
+            jd_data = json.loads(interview.jd_analysis_json) if interview.jd_analysis_json else None
+            jd_prof = JDProfileSchema(**jd_data) if jd_data and ("validation" not in jd_data or "required_skills" in jd_data) else None
             skill_match = SkillMatchSchema(**json.loads(interview.skill_match_json)) if interview.skill_match_json else SkillMatchSchema()
 
-        # Generate questions
-        generated = await QuestionService.generate_initial_questions(
+        # Clear previous questions if regenerating
+        if force_regenerate:
+            db.execute("DELETE FROM interview_questions WHERE interview_id = ?", (interview_id,))
+
+        # Fetch past questions from prior interviews for this user to avoid cross-interview repetition
+        past_q_rows = db.fetchall(
+            """
+            SELECT iq.question_text
+            FROM interview_questions iq
+            JOIN interviews i ON iq.interview_id = i.id
+            WHERE i.user_id = ? AND i.id != ?
+            ORDER BY iq.id DESC LIMIT 15
+            """,
+            (user_id, interview_id)
+        )
+        past_questions = [r["question_text"] for r in past_q_rows if r["question_text"]]
+
+        # Dynamically generate Question 1 via Gemini
+        q1 = await QuestionService.generate_initial_question(
             interview_id=interview.id,
             interview_type=interview.interview_type,
             company_name=interview.company_name,
             job_role=interview.job_role,
             resume=resume_prof,
             jd=jd_prof,
-            skill_match=skill_match
+            skill_match=skill_match,
+            past_session_questions=past_questions
         )
 
-        # Clear previous questions if regenerating
-        if force_regenerate:
-            db.execute("DELETE FROM interview_questions WHERE interview_id = ?", (interview_id,))
-
-        # Save to database
-        saved_questions = []
-        for q in generated:
-            cursor = db.execute(
-                """
-                INSERT INTO interview_questions (
-                    interview_id, question_text, question_category, difficulty,
-                    expected_focus_json, source, order_num, status, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now', 'utc'))
-                """,
-                (
-                    interview.id,
-                    q.question,
-                    q.category,
-                    q.difficulty,
-                    json.dumps(q.expected_focus),
-                    q.source,
-                    q.order_number
-                )
+        cursor = db.execute(
+            """
+            INSERT INTO interview_questions (
+                interview_id, question_text, question_category, difficulty,
+                expected_focus_json, source, order_num, status, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, 1, 'pending', datetime('now', 'utc'))
+            """,
+            (
+                interview.id,
+                q1.question,
+                q1.category,
+                q1.difficulty,
+                json.dumps(q1.expected_focus),
+                q1.source
             )
-            q_id = cursor.lastrowid
-            q.id = q_id
-            saved_questions.append(q)
-
+        )
+        q1.id = cursor.lastrowid
         db.commit()
-        return saved_questions
+        return [q1]
 
     @staticmethod
     def get_interview_questions(db: DatabaseSession, interview_id: int, user_id: int) -> List[QuestionSchema]:
@@ -374,10 +442,30 @@ class InterviewService:
     @staticmethod
     def start_interview(db: DatabaseSession, interview_id: int, user_id: int) -> Interview:
         interview = InterviewService.get_interview_by_id(db, interview_id, user_id)
-        db.execute(
-            "UPDATE interviews SET status = 'in_progress', updated_at = datetime('now', 'utc') WHERE id = ?",
-            (interview.id,)
-        )
+        if interview.status == "completed":
+            return interview
+
+        now_utc = datetime.now(timezone.utc)
+        if not interview.started_at or not interview.expires_at:
+            duration = interview.duration_minutes or 30
+            expires_dt = now_utc + timedelta(minutes=duration)
+            started_at_str = now_utc.strftime("%Y-%m-%d %H:%M:%S")
+            expires_at_str = expires_dt.strftime("%Y-%m-%d %H:%M:%S")
+            db.execute(
+                "UPDATE interviews SET status = 'in_progress', started_at = ?, expires_at = ?, updated_at = datetime('now', 'utc') WHERE id = ?",
+                (started_at_str, expires_at_str, interview.id)
+            )
+        else:
+            if InterviewService.is_interview_expired(interview):
+                db.execute(
+                    "UPDATE interviews SET status = 'completed', updated_at = datetime('now', 'utc') WHERE id = ?",
+                    (interview.id,)
+                )
+            else:
+                db.execute(
+                    "UPDATE interviews SET status = 'in_progress', updated_at = datetime('now', 'utc') WHERE id = ?",
+                    (interview.id,)
+                )
         db.commit()
         return InterviewService.get_interview_by_id(db, interview_id, user_id)
 
@@ -393,9 +481,31 @@ class InterviewService:
     ) -> AnswerSubmitResponse:
         """
         Receives answer transcript, runs multi-modal analysis (Technical, Communication, Fluency),
-        updates question status, evaluates dynamic follow-up, and returns next question.
+        updates question status, evaluates dynamic follow-up vs next question via Gemini,
+        and returns next question dynamically. Governed strictly by interview timer.
         """
         interview = InterviewService.get_interview_by_id(db, interview_id, user_id)
+
+        # Expiry and Completion Check: Backend expiry must win
+        if interview.status == "completed" or InterviewService.check_and_handle_expiry(db, interview):
+            return AnswerSubmitResponse(
+                interview_id=interview.id,
+                question_id=question_id,
+                answer_id=0,
+                technical_evaluation=TechnicalEvaluationSchema(
+                    technical_score=0.0, correctness=0.0, relevance=0.0, completeness=0.0, depth=0.0, feedback="Interview session has ended."
+                ),
+                communication_evaluation=CommunicationEvaluationSchema(
+                    grammar_score=0.0, vocabulary_score=0.0, clarity_score=0.0, communication_score=0.0, feedback="Interview session has ended."
+                ),
+                fluency_evaluation=FluencyEvaluationSchema(
+                    fluency_score=0.0, wpm=0.0, speaking_duration=speaking_duration, filler_word_count=0
+                ),
+                is_follow_up=False,
+                next_question=None,
+                is_completed=True,
+                message="Interview time has ended. Session completed."
+            )
 
         # 1. Fetch Question
         q_row = db.fetchone(
@@ -423,19 +533,19 @@ class InterviewService:
         # 3. Mark Question as answered
         db.execute("UPDATE interview_questions SET status = 'answered' WHERE id = ?", (question.id,))
 
-        # 4. Multi-modal Analysis
-        tech_eval = await AnswerEvaluationService.evaluate_technical_answer(
+        # 4. Multi-modal Analysis (evaluate technical and communication concurrently)
+        tech_task = AnswerEvaluationService.evaluate_technical_answer(
             question_text=question.question_text,
             question_category=question.question_category,
             expected_focus=question.expected_focus,
             candidate_answer=transcript,
             role_context=interview.job_role
         )
-
-        comm_eval = await CommunicationService.evaluate_communication(
+        comm_task = CommunicationService.evaluate_communication(
             transcript=transcript,
             question_context=question.question_text
         )
+        tech_eval, comm_eval = await asyncio.gather(tech_task, comm_task)
 
         fluency_eval = FluencyService.analyze_fluency(
             transcript=transcript,
@@ -463,85 +573,121 @@ class InterviewService:
         )
         db.commit()
 
-        # 6. Dynamic Follow-up Check
-        # Count existing questions and follow-ups for this parent
-        all_q_rows = db.fetchall("SELECT * FROM interview_questions WHERE interview_id = ?", (interview.id,))
-        total_questions = len(all_q_rows)
-
-        topic_parent_id = question.parent_question_id or question.id
-        topic_follow_ups = sum(1 for r in all_q_rows if r["parent_question_id"] == topic_parent_id)
-
-        follow_up = None
-        is_follow_up = False
-
-        # If answer was not a brief single-word and we haven't reached topic follow-up limit
-        if question.source != "FOLLOW_UP" or topic_follow_ups < 2:
-            parent_schema = QuestionSchema(
-                id=question.id,
-                interview_id=question.interview_id,
-                question=question.question_text,
-                category=question.question_category,
-                difficulty=question.difficulty,
-                expected_focus=question.expected_focus,
-                source=question.source,
-                order_number=question.order_num
-            )
-            follow_up = await QuestionService.generate_dynamic_follow_up(
+        # 6. Check Expiry before generating next question
+        if InterviewService.check_and_handle_expiry(db, interview):
+            return AnswerSubmitResponse(
                 interview_id=interview.id,
-                parent_question=parent_schema,
-                candidate_answer=transcript,
-                topic_follow_up_count=topic_follow_ups,
-                total_questions_asked=total_questions,
-                job_role=interview.job_role
+                question_id=question.id,
+                answer_id=answer_id,
+                technical_evaluation=tech_eval,
+                communication_evaluation=comm_eval,
+                fluency_evaluation=fluency_eval,
+                is_follow_up=False,
+                next_question=None,
+                is_completed=True,
+                message="Interview time has ended. Session completed."
             )
 
-        next_q_schema = None
-        if follow_up:
-            # Insert follow up as next question
-            f_cursor = db.execute(
-                """
-                INSERT INTO interview_questions (
-                    interview_id, question_text, question_category, difficulty,
-                    expected_focus_json, source, order_num, parent_question_id, status, created_at
-                ) VALUES (?, ?, ?, ?, ?, 'FOLLOW_UP', ?, ?, 'pending', datetime('now', 'utc'))
-                """,
-                (
-                    interview.id,
-                    follow_up.question,
-                    follow_up.category,
-                    follow_up.difficulty,
-                    json.dumps(follow_up.expected_focus),
-                    total_questions + 1,
-                    topic_parent_id
-                )
-            )
-            db.commit()
-            follow_up.id = f_cursor.lastrowid
-            next_q_schema = follow_up
-            is_follow_up = True
-        else:
-            # Fetch next pending question in queue
-            pending_row = db.fetchone(
-                "SELECT * FROM interview_questions WHERE interview_id = ? AND status = 'pending' ORDER BY order_num ASC LIMIT 1",
-                (interview.id,)
-            )
-            if pending_row:
-                next_q_schema = QuestionSchema(
-                    id=pending_row["id"],
-                    interview_id=pending_row["interview_id"],
-                    question=pending_row["question_text"],
-                    category=pending_row["question_category"],
-                    difficulty=pending_row["difficulty"],
-                    expected_focus=json.loads(pending_row["expected_focus_json"] or "[]"),
-                    source=pending_row["source"],
-                    order_number=pending_row["order_num"],
-                    status="pending"
-                )
+        # 7. Dynamic Next Question / Follow-up Generation via Gemini
+        all_q_rows = db.fetchall(
+            "SELECT * FROM interview_questions WHERE interview_id = ? ORDER BY order_num ASC",
+            (interview.id,)
+        )
+        all_ans_rows = db.fetchall(
+            "SELECT * FROM interview_answers WHERE interview_id = ? ORDER BY id ASC",
+            (interview.id,)
+        )
 
-        is_completed = next_q_schema is None
-        if is_completed:
-            db.execute("UPDATE interviews SET status = 'completed', updated_at = datetime('now', 'utc') WHERE id = ?", (interview.id,))
-            db.commit()
+        # Parse profile objects
+        resume_prof = ResumeProfileSchema(**json.loads(interview.resume_analysis_json)) if interview.resume_analysis_json else ResumeProfileSchema()
+        jd_prof = None
+        if interview.jd_analysis_json:
+            try:
+                jd_data = json.loads(interview.jd_analysis_json)
+                if jd_data and ("validation" not in jd_data or "required_skills" in jd_data):
+                    jd_prof = JDProfileSchema(**jd_data)
+            except Exception:
+                pass
+        skill_match = SkillMatchSchema(**json.loads(interview.skill_match_json)) if interview.skill_match_json else SkillMatchSchema()
+
+        # Compute remaining seconds
+        rem_seconds = None
+        if interview.expires_at:
+            exp_dt = parse_utc_timestamp(interview.expires_at)
+            if exp_dt:
+                rem_seconds = max(0, int((exp_dt - datetime.now(timezone.utc)).total_seconds()))
+
+        parent_schema = QuestionSchema(
+            id=question.id,
+            interview_id=question.interview_id,
+            question=question.question_text,
+            category=question.question_category,
+            difficulty=question.difficulty,
+            expected_focus=question.expected_focus,
+            source=question.source,
+            order_number=question.order_num
+        )
+
+        next_q, is_follow_up = await QuestionService.generate_next_question_or_follow_up(
+            interview_id=interview.id,
+            interview_type=interview.interview_type,
+            company_name=interview.company_name,
+            job_role=interview.job_role,
+            resume=resume_prof,
+            jd=jd_prof,
+            skill_match=skill_match,
+            previous_questions=all_q_rows,
+            previous_answers=all_ans_rows,
+            latest_question=parent_schema,
+            latest_answer=transcript,
+            latest_eval=tech_eval,
+            remaining_time_seconds=rem_seconds,
+            current_order_number=len(all_q_rows)
+        )
+
+        # Guard: Check expiry again in case Gemini generation took time past expires_at
+        if InterviewService.check_and_handle_expiry(db, interview):
+            return AnswerSubmitResponse(
+                interview_id=interview.id,
+                question_id=question.id,
+                answer_id=answer_id,
+                technical_evaluation=tech_eval,
+                communication_evaluation=comm_eval,
+                fluency_evaluation=fluency_eval,
+                is_follow_up=False,
+                next_question=None,
+                is_completed=True,
+                message="Interview time has ended. Session completed."
+            )
+
+        # Persist new question in database
+        topic_parent_id = None
+        if is_follow_up and question.id:
+            parent_candidate = question.parent_question_id or question.id
+            parent_exists = db.fetchone("SELECT id FROM interview_questions WHERE id = ? AND interview_id = ?", (parent_candidate, interview.id))
+            if parent_exists:
+                topic_parent_id = parent_candidate
+
+        q_cursor = db.execute(
+            """
+            INSERT INTO interview_questions (
+                interview_id, question_text, question_category, difficulty,
+                expected_focus_json, source, order_num, parent_question_id, status, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now', 'utc'))
+            """,
+            (
+                interview.id,
+                next_q.question,
+                next_q.category,
+                next_q.difficulty,
+                json.dumps(next_q.expected_focus),
+                next_q.source,
+                len(all_q_rows) + 1,
+                topic_parent_id
+            )
+        )
+        db.commit()
+        next_q.id = q_cursor.lastrowid
 
         return AnswerSubmitResponse(
             interview_id=interview.id,
@@ -551,9 +697,9 @@ class InterviewService:
             communication_evaluation=comm_eval,
             fluency_evaluation=fluency_eval,
             is_follow_up=is_follow_up,
-            next_question=next_q_schema,
-            is_completed=is_completed,
-            message="Answer evaluated successfully." if not is_completed else "Interview session completed! Ready for report generation in Master Prompt 3."
+            next_question=next_q,
+            is_completed=False,
+            message="Answer evaluated successfully."
         )
 
     @staticmethod

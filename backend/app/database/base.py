@@ -46,6 +46,9 @@ def init_db():
         jd_analysis_json TEXT,
         skill_match_json TEXT,
         ats_analysis_json TEXT,
+        duration_minutes INTEGER DEFAULT 30,
+        started_at TEXT,
+        expires_at TEXT,
         status TEXT NOT NULL DEFAULT 'setup' CHECK(status IN ('setup', 'processing', 'ready', 'in_progress', 'completed', 'failed')),
         overall_score REAL,
         technical_score REAL,
@@ -57,8 +60,11 @@ def init_db():
     );
     """)
 
-    # Safe migration for older SQLite databases that were created before ats_analysis_json existed.
+    # Safe migration for older SQLite databases that were created before ats_analysis_json or duration/expiry existed.
     ensure_column_exists(conn, "interviews", "ats_analysis_json", "TEXT")
+    ensure_column_exists(conn, "interviews", "duration_minutes", "INTEGER DEFAULT 30")
+    ensure_column_exists(conn, "interviews", "started_at", "TEXT")
+    ensure_column_exists(conn, "interviews", "expires_at", "TEXT")
 
     # 3. InterviewQuestion table
     cursor.execute("""

@@ -10,6 +10,7 @@ export function InterviewSetup() {
 
   // State
   const [interviewType, setInterviewType] = useState('company'); // 'company' or 'general'
+  const [durationMinutes, setDurationMinutes] = useState(30);
   const [companyName, setCompanyName] = useState('');
   const [jobRole, setJobRole] = useState('');
   const [resumeFile, setResumeFile] = useState(null);
@@ -34,8 +35,10 @@ export function InterviewSetup() {
         setError('Please enter the target job role (e.g. Frontend Developer, SDE 1).');
         return;
       }
-      if (!jdFile) {
-        setError('Please upload the Job Description (PDF or DOCX).');
+      const hasJdText = Boolean(jdText && jdText.trim());
+      const hasJdFile = Boolean(jdFile);
+      if (!hasJdText && !hasJdFile) {
+        setError('Please provide a Job Description by pasting text or uploading a PDF/DOCX file.');
         return;
       }
       if (!resumeFile) {
@@ -56,15 +59,23 @@ export function InterviewSetup() {
         interview_type: interviewType,
         company_name: companyName.trim(),
         job_role: jobRole.trim(),
+        duration_minutes: durationMinutes,
       });
 
       const interviewId = interview.id;
 
       if (interviewType === 'company') {
-        if (jdText && jdText.trim()) {
+        const hasJdText = Boolean(jdText && jdText.trim());
+        const hasJdFile = Boolean(jdFile);
+
+        if (hasJdText && hasJdFile) {
+          setUploadProgressMsg('Step 2/4: Saving pasted Job Description and uploading JD file...');
+          await interviewService.submitJDText(interviewId, jdText.trim());
+          await interviewService.uploadJD(interviewId, jdFile);
+        } else if (hasJdText) {
           setUploadProgressMsg('Step 2/4: Saving pasted Job Description...');
-          await interviewService.submitJDText(interviewId, jdText);
-        } else if (jdFile) {
+          await interviewService.submitJDText(interviewId, jdText.trim());
+        } else if (hasJdFile) {
           setUploadProgressMsg('Step 2/4: Uploading & extracting text from Job Description...');
           await interviewService.uploadJD(interviewId, jdFile);
         }
@@ -155,6 +166,41 @@ export function InterviewSetup() {
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+
+        {/* Step: Choose Interview Duration */}
+        <div className="form-section">
+          <label className="section-label">Choose Interview Duration</label>
+          <div className="duration-selector-grid">
+            {[
+              { val: 1, label: '1 min', desc: '1 minute — TESTING' },
+              { val: 20, label: '20 mins', desc: '20 minutes' },
+              { val: 30, label: '30 mins', desc: '30 minutes (Standard)' },
+              { val: 45, label: '45 mins', desc: '45 minutes' },
+              { val: 60, label: '60 mins', desc: '60 minutes' },
+              { val: 90, label: '90 mins', desc: '90 minutes' },
+            ].map(opt => (
+              <div
+                key={opt.val}
+                className={`duration-card ${durationMinutes === opt.val ? 'selected' : ''}`}
+                onClick={() => !isSubmitting && setDurationMinutes(opt.val)}
+              >
+                <div className="duration-card-radio">
+                  <input
+                    type="radio"
+                    name="duration_minutes"
+                    checked={durationMinutes === opt.val}
+                    onChange={() => setDurationMinutes(opt.val)}
+                    disabled={isSubmitting}
+                  />
+                </div>
+                <div className="duration-card-content">
+                  <span className="duration-tag">{opt.label}</span>
+                  <span className="duration-name">{opt.desc}</span>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
 

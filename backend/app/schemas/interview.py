@@ -5,6 +5,7 @@ class InterviewCreate(BaseModel):
     interview_type: str = Field(..., description="'company' or 'general'")
     company_name: Optional[str] = Field(None, max_length=150)
     job_role: Optional[str] = Field(None, max_length=150)
+    duration_minutes: Optional[int] = Field(30, description="Interview duration in minutes: 1, 20, 30, 45, 60, 90")
 
     @root_validator(skip_on_failure=True)
     def validate_interview_fields(cls, values):
@@ -25,6 +26,11 @@ class InterviewCreate(BaseModel):
         else:
             values["company_name"] = None
             values["job_role"] = None
+        
+        # Ensure duration_minutes is positive integer, default 30
+        dur = values.get("duration_minutes")
+        if dur is None or dur <= 0:
+            values["duration_minutes"] = 30
         return values
 
 class ResumeProfileSchema(BaseModel):
@@ -73,6 +79,9 @@ class InterviewResponse(BaseModel):
     jd_original_name: Optional[str] = None
     resume_filename: Optional[str] = None
     resume_original_name: Optional[str] = None
+    duration_minutes: Optional[int] = 30
+    started_at: Optional[str] = None
+    expires_at: Optional[str] = None
     status: str
     overall_score: Optional[float] = None
     technical_score: Optional[float] = None
@@ -112,7 +121,7 @@ class FileUploadResponse(BaseModel):
     message: str
     interview_id: int
     file_type: str
-    filename: str
+    filename: Optional[str] = None
     original_name: str
     word_count: int
     interview_status: str

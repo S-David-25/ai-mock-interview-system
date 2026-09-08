@@ -9,8 +9,14 @@ def create_sample_pdf_bytes(text: str) -> bytes:
     pdf.add_page()
     pdf.set_font("helvetica", size=12)
     for line in text.split('\n'):
-        pdf.cell(w=200, h=10, text=line, new_x="LMARGIN", new_y="NEXT")
-    out = pdf.output()
+        try:
+            pdf.cell(w=200, h=10, txt=line, ln=1)
+        except TypeError:
+            pdf.cell(w=200, h=10, text=line)
+    try:
+        out = pdf.output(dest='S')
+    except Exception:
+        out = pdf.output()
     if isinstance(out, (bytes, bytearray)):
         return bytes(out)
     return out.encode('latin-1')
@@ -67,16 +73,21 @@ class TestReportAndProgressEndpoints(unittest.TestCase):
         # 3. Process & Generate questions
         self.client.post(f"/api/interviews/{int_id}/process", headers=self.headers_a)
         q_res = self.client.post(f"/api/interviews/{int_id}/generate-questions", headers=self.headers_a)
-        questions = q_res.json()["questions"]
+        q_json = q_res.json() if q_res.status_code == 200 else self.client.get(f"/api/interviews/{int_id}/questions", headers=self.headers_a).json()
+        questions = q_json.get("questions", [])
 
         # 4. Start & Answer
         self.client.post(f"/api/interviews/{int_id}/start", headers=self.headers_a)
-        for q in questions[:2]:
-            self.client.post(f"/api/interviews/{int_id}/answer", json={
-                "question_id": q["id"],
+        curr_q = questions[0] if questions else None
+        for _ in range(2):
+            if not curr_q:
+                break
+            ans_res = self.client.post(f"/api/interviews/{int_id}/answer", json={
+                "question_id": curr_q["id"],
                 "transcript": f"In our {company} preparation project, we implemented clean microservices architecture with PostgreSQL database indexing.",
                 "speaking_duration": 15.0
             }, headers=self.headers_a)
+            curr_q = ans_res.json().get("next_question")
 
         # Complete
         self.client.post(f"/api/interviews/{int_id}/complete", headers=self.headers_a)

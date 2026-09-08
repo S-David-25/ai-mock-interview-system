@@ -42,7 +42,8 @@ class JDService:
                 result = await GeminiService.generate_structured_json(
                     prompt=prompt,
                     system_instruction=system_instruction,
-                    response_model=JDProfileSchema
+                    response_model=JDProfileSchema,
+                    purpose="Job Description Analysis"
                 )
                 return JDProfileSchema(**result)
             except Exception as e:
@@ -119,7 +120,7 @@ class JDService:
             resume_score = max(0.0, resume_score - 0.35)
 
         confidence = min(1.0, max(0.0, jd_score - resume_score))
-        is_valid = (jd_score >= 0.6 and jd_score >= resume_score + 0.2) or (strong_jd_structure >= 2 and jd_score >= 0.5 and resume_score < 0.5)
+        is_valid = (jd_score >= 0.5 and jd_score >= resume_score + 0.1) or (strong_jd_structure >= 1 and jd_score >= 0.4 and resume_score < 0.4)
         doc_type = "job_description" if is_valid else ("resume" if resume_score > jd_score else "unknown")
 
         if not reasons:

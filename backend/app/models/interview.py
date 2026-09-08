@@ -19,6 +19,9 @@ class Interview:
     jd_analysis_json: Optional[str] = None
     skill_match_json: Optional[str] = None
     ats_analysis_json: Optional[str] = None
+    duration_minutes: int = 30
+    started_at: Optional[str] = None
+    expires_at: Optional[str] = None
     status: str = "setup" # setup, processing, ready, in_progress, completed, failed
     overall_score: Optional[float] = None
     technical_score: Optional[float] = None
@@ -47,6 +50,9 @@ class Interview:
             jd_analysis_json=row.get("jd_analysis_json"),
             skill_match_json=row.get("skill_match_json"),
             ats_analysis_json=row.get("ats_analysis_json"),
+            duration_minutes=int(row.get("duration_minutes") or 30),
+            started_at=row.get("started_at"),
+            expires_at=row.get("expires_at"),
             status=row.get("status"),
             overall_score=row.get("overall_score"),
             technical_score=row.get("technical_score"),
@@ -67,6 +73,9 @@ class Interview:
             "jd_original_name": self.jd_original_name,
             "resume_filename": self.resume_filename,
             "resume_original_name": self.resume_original_name,
+            "duration_minutes": self.duration_minutes,
+            "started_at": self.started_at,
+            "expires_at": self.expires_at,
             "status": self.status,
             "overall_score": self.overall_score,
             "technical_score": self.technical_score,
@@ -74,8 +83,8 @@ class Interview:
             "facial_score": self.facial_score,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
-            "is_resume_uploaded": bool(self.resume_filename),
-            "is_jd_uploaded": bool(self.jd_filename),
+            "is_resume_uploaded": bool(self.resume_filename or self.resume_text),
+            "is_jd_uploaded": bool(self.jd_filename or self.jd_text),
         }
         if include_text:
             data["jd_text"] = self.jd_text

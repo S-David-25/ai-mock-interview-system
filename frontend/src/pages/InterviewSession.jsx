@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { interviewService } from '../services/interviewService';
 import { LoadingSpinner } from '../components/LoadingSpinner';
 import { Alert } from '../components/Alert';
+import { formatDuration } from '../utils/formatters';
 
 export function InterviewSession() {
   const { id } = useParams();
@@ -16,6 +17,7 @@ export function InterviewSession() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [sessionCompleted, setSessionCompleted] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(null);
 
   // Audio Recording State
   const [isRecording, setIsRecording] = useState(false);
@@ -40,6 +42,62 @@ export function InterviewSession() {
   const videoRef = useRef(null);
   const videoStreamRef = useRef(null);
   const visionIntervalRef = useRef(null);
+  const countdownIntervalRef = useRef(null);
+  const isCompletingRef = useRef(false);
+
+  const parseUtcExpiresAt = (expiresAtStr) => {
+    if (!expiresAtStr) return null;
+    const clean = String(expiresAtStr).trim().replace(' ', 'T') + (expiresAtStr.includes('Z') || expiresAtStr.includes('+') || (expiresAtStr.length > 10 && expiresAtStr.slice(10).includes('-')) ? '' : 'Z');
+    const target = new Date(clean).getTime();
+    if (isNaN(target)) return null;
+    return target;
+  };
+
+  const handleExpireAndComplete = async () => {
+    if (isCompletingRef.current) return;
+    isCompletingRef.current = true;
+
+    // 1. Cancel TTS
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      setIsSpeaking(false);
+    }
+
+    // 2. Stop audio recording
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      try {
+        mediaRecorderRef.current.stop();
+      } catch (e) {}
+    }
+    setIsRecording(false);
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+
+    // 3. Stop camera
+    stopCamera();
+
+    // 4. Clear intervals
+    if (countdownIntervalRef.current) {
+      clearInterval(countdownIntervalRef.current);
+      countdownIntervalRef.current = null;
+    }
+    if (visionIntervalRef.current) {
+      clearInterval(visionIntervalRef.current);
+      visionIntervalRef.current = null;
+    }
+
+    // 5. Complete session in backend
+    try {
+      await interviewService.completeInterview(id);
+    } catch (e) {
+      // Backend may already have expired it
+    }
+
+    // 6. Transition to completion UI
+    setSessionCompleted(true);
+  };
 
   // 1. Initialize Interview & Questions
   useEffect(() => {
@@ -47,13 +105,25 @@ export function InterviewSession() {
       setIsLoading(true);
       setError(null);
       try {
-        const intData = await interviewService.getInterviewById(id);
-        setInterview(intData);
+        let intData = await interviewService.getInterviewById(id);
 
         if (intData.status === 'setup') {
           navigate(`/interviews/${id}`);
           return;
         }
+
+        if (intData.status === 'completed') {
+          setInterview(intData);
+          setSessionCompleted(true);
+          setIsLoading(false);
+          return;
+        }
+
+        // Start session if ready or in_progress to establish server-authoritative expires_at
+        if (intData.status === 'ready' || intData.status === 'in_progress') {
+          intData = await interviewService.startInterview(id);
+        }
+        setInterview(intData);
 
         // Generate or retrieve questions
         let qData = await interviewService.getQuestions(id);
@@ -72,10 +142,42 @@ export function InterviewSession() {
           setSessionCompleted(true);
         }
 
-        // Start session if ready
-        if (intData.status === 'ready') {
-          await interviewService.startInterview(id);
+        // Setup Countdown Timer
+        const targetTime = parseUtcExpiresAt(intData.expires_at);
+        let initialRemaining = 0;
+        if (targetTime) {
+          initialRemaining = Math.max(0, Math.floor((targetTime - Date.now()) / 1000));
+        } else {
+          initialRemaining = (intData.duration_minutes || 30) * 60;
         }
+        setTimeLeft(initialRemaining);
+
+        if (initialRemaining <= 0) {
+          handleExpireAndComplete();
+          return;
+        }
+
+        if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+        countdownIntervalRef.current = setInterval(() => {
+          if (targetTime) {
+            const rem = Math.max(0, Math.floor((targetTime - Date.now()) / 1000));
+            setTimeLeft(rem);
+            if (rem <= 0) {
+              clearInterval(countdownIntervalRef.current);
+              handleExpireAndComplete();
+            }
+          } else {
+            setTimeLeft(prev => {
+              if (prev === null || prev <= 1) {
+                clearInterval(countdownIntervalRef.current);
+                handleExpireAndComplete();
+                return 0;
+              }
+              return prev - 1;
+            });
+          }
+        }, 1000);
+
       } catch (err) {
         setError(err.message || 'Failed to initialize AI interview session.');
       } finally {
@@ -95,6 +197,7 @@ export function InterviewSession() {
       if (window.speechSynthesis) window.speechSynthesis.cancel();
       if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
       if (visionIntervalRef.current) clearInterval(visionIntervalRef.current);
+      if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
     };
   }, [id]);
 
@@ -179,6 +282,9 @@ export function InterviewSession() {
 
   // 4. Audio Recording
   const startRecording = async () => {
+    if (sessionCompleted || (timeLeft !== null && timeLeft <= 0) || isCompletingRef.current) {
+      return;
+    }
     setError(null);
     stopSpeaking();
     setTranscript('');
@@ -228,6 +334,9 @@ export function InterviewSession() {
 
   // 5. Submit and Evaluate Spoken/Typed Answer
   const processSpokenAnswer = async (audioBlob) => {
+    if (sessionCompleted || (timeLeft !== null && timeLeft <= 0) || isCompletingRef.current) {
+      return;
+    }
     setIsProcessingAnswer(true);
     try {
       // Step 1: Transcribe
@@ -238,13 +347,20 @@ export function InterviewSession() {
       // Step 2: Submit & Multi-modal Evaluate
       await submitAnswerToEngine(finalTranscript, transData.audio_filename, transData.duration_seconds || recordingSeconds);
     } catch (err) {
-      setError(err.message || 'Failed to process spoken answer.');
+      if (err.message && err.message.toLowerCase().includes('expired')) {
+        handleExpireAndComplete();
+      } else {
+        setError(err.message || 'Failed to process spoken answer.');
+      }
     } finally {
       setIsProcessingAnswer(false);
     }
   };
 
   const handleManualSubmit = async () => {
+    if (sessionCompleted || (timeLeft !== null && timeLeft <= 0) || isCompletingRef.current) {
+      return;
+    }
     if (!transcript.trim()) {
       setError('Please provide a spoken or typed answer before submitting.');
       return;
@@ -254,36 +370,56 @@ export function InterviewSession() {
     try {
       await submitAnswerToEngine(transcript.trim(), null, 15.0);
     } catch (err) {
-      setError(err.message || 'Failed to evaluate answer.');
+      if (err.message && err.message.toLowerCase().includes('expired')) {
+        handleExpireAndComplete();
+      } else {
+        setError(err.message || 'Failed to evaluate answer.');
+      }
     } finally {
       setIsProcessingAnswer(false);
     }
   };
 
   const submitAnswerToEngine = async (answerText, audioFilename, duration) => {
-    const response = await interviewService.submitAnswer(id, {
-      questionId: currentQuestion.id,
-      transcript: answerText,
-      speakingDuration: duration,
-      audioFilename: audioFilename,
-    });
+    if (!currentQuestion) return;
+    try {
+      const response = await interviewService.submitAnswer(id, {
+        questionId: currentQuestion.id,
+        transcript: answerText,
+        speakingDuration: duration,
+        audioFilename: audioFilename,
+      });
 
-    setLastFeedback({
-      technical: response.technical_evaluation,
-      communication: response.communication_evaluation,
-      fluency: response.fluency_evaluation,
-    });
+      // Guard: Ignore response if session expired in background
+      if (isCompletingRef.current || (timeLeft !== null && timeLeft <= 0)) {
+        handleExpireAndComplete();
+        return;
+      }
 
-    if (response.is_follow_up) {
-      setIsFollowUpAlert(true);
-      setCurrentQuestion(response.next_question);
-      setTranscript('');
-    } else if (response.is_completed) {
-      setSessionCompleted(true);
-    } else if (response.next_question) {
-      setCurrentQuestion(response.next_question);
-      setCurrentIndex(prev => prev + 1);
-      setTranscript('');
+      setLastFeedback({
+        technical: response.technical_evaluation,
+        communication: response.communication_evaluation,
+        fluency: response.fluency_evaluation,
+      });
+
+      if (response.is_completed) {
+        handleExpireAndComplete();
+      } else if (response.next_question) {
+        setQuestions(prev => {
+          const exists = prev.some(q => q.id === response.next_question.id);
+          return exists ? prev : [...prev, response.next_question];
+        });
+        setIsFollowUpAlert(Boolean(response.is_follow_up));
+        setCurrentQuestion(response.next_question);
+        setCurrentIndex(prev => prev + 1);
+        setTranscript('');
+      }
+    } catch (err) {
+      if (err.message && err.message.toLowerCase().includes('expired')) {
+        handleExpireAndComplete();
+      } else {
+        throw err;
+      }
     }
   };
 
@@ -295,28 +431,70 @@ export function InterviewSession() {
     );
   }
 
+  if (error && !currentQuestion) {
+    return (
+      <div className="page-container py-5">
+        <div className="detail-card" style={{ maxWidth: '600px', margin: '0 auto', textAlign: 'center' }}>
+          <h2 style={{ color: '#dc2626', marginBottom: '1rem' }}>⚠️ Unable to Load Interview Session</h2>
+          <Alert type="error" message={error} />
+          <div style={{ marginTop: '1.5rem', display: 'flex', gap: '1rem', justifyContent: 'center' }}>
+            <button onClick={() => window.location.reload()} className="btn btn-secondary">
+              🔄 Retry
+            </button>
+            <Link to={`/interviews/${id}`} className="btn btn-primary">
+              ← Return to Session Setup
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!currentQuestion && !sessionCompleted) {
+    return (
+      <div className="page-container py-5 text-center">
+        <div className="detail-card" style={{ maxWidth: '600px', margin: '0 auto' }}>
+          <h3>Preparing AI Interview Question...</h3>
+          <p style={{ color: '#64748b', marginTop: '0.5rem' }}>The AI interviewer is retrieving or generating your dynamic question.</p>
+          <div style={{ marginTop: '1.5rem', display: 'flex', gap: '1rem', justifyContent: 'center' }}>
+            <button onClick={() => window.location.reload()} className="btn btn-primary">
+              🔄 Refresh Session
+            </button>
+            <Link to={`/interviews/${id}`} className="btn btn-secondary">
+              ← Back to Setup
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (sessionCompleted) {
     return (
       <div className="session-completed-card">
         <div className="completed-icon">🎉</div>
         <h1 className="completed-title">Mock Interview Completed!</h1>
         <p className="completed-subtitle">
-          Great job! All technical and situational questions have been answered and evaluated across multi-modal benchmarks.
+          Great job! Your interview session has terminated and multi-modal evaluations are finalized.
         </p>
 
         <div className="completed-summary-box">
           <h3>Session Summary (Session #{id})</h3>
           <p><strong>Candidate:</strong> {interview?.resume_analysis?.candidate_name || 'Candidate'}</p>
-          <p><strong>Interview Type:</strong> {interview?.interview_type === 'company' ? `${interview?.company_name} — ${interview?.job_role}` : 'General Placement Mock'}</p>
+          <p><strong>Interview Type:</strong> {interview?.interview_type === 'company' ? `${interview?.company_name || 'Target Company'} — ${interview?.job_role || 'Target Role'}` : 'General Placement Mock'}</p>
+          <p><strong>Duration Selected:</strong> {interview?.duration_minutes || 30} minutes</p>
           <p><strong>Questions Evaluated:</strong> {questions.length} questions</p>
         </div>
 
-        <div style={{ marginTop: '2rem', display: 'flex', gap: '1rem', justifyContent: 'center' }}>
+        <div style={{ marginTop: '2rem', display: 'flex', gap: '1rem', justifyContent: 'center', flexWrap: 'wrap' }}>
           <Link to="/dashboard" className="btn btn-primary btn-lg">
             Return to Dashboard
           </Link>
           <Link to={`/interviews/${id}`} className="btn btn-secondary btn-lg">
             View Session Details
+          </Link>
+          <Link to={`/interviews/${id}/report`} className="btn btn-primary btn-lg shadow-glow">
+            📊 View Performance Report
           </Link>
         </div>
       </div>
@@ -331,10 +509,13 @@ export function InterviewSession() {
       <div className="session-topbar">
         <div className="session-info">
           <span className="session-type-pill">
-            {isCompany ? `🏢 ${interview.company_name} • ${interview.job_role}` : '🌐 General Placement Interview'}
+            {isCompany ? `🏢 ${interview?.company_name || 'Company'} • ${interview?.job_role || 'Role'}` : '🌐 General Placement Interview'}
           </span>
           <span className="question-counter-badge">
-            Question {currentIndex + 1} {currentQuestion?.source === 'FOLLOW_UP' ? '(Dynamic Follow-up)' : `of ${questions.length}`}
+            Question {currentIndex + 1} {currentQuestion?.source === 'FOLLOW_UP' ? '(Dynamic Follow-up)' : ''}
+          </span>
+          <span className={`timer-badge ${timeLeft !== null && timeLeft <= 60 ? 'timer-warning pulse-fast' : ''}`}>
+            ⏱️ {formatDuration(timeLeft !== null ? timeLeft : (interview?.duration_minutes || 30) * 60)}
           </span>
         </div>
         <div className="session-actions">
@@ -396,7 +577,7 @@ export function InterviewSession() {
               {/* TTS Controls */}
               <div className="tts-controls-row">
                 <button
-                  onClick={() => speakText(currentQuestion.question)}
+                  onClick={() => currentQuestion?.question && speakText(currentQuestion.question)}
                   className="btn btn-outline btn-sm"
                   title="Replay Question Audio"
                 >

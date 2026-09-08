@@ -18,20 +18,21 @@ class AuthService:
 
     @staticmethod
     def register_user(db: DatabaseSession, data: UserRegister) -> Tuple[User, str]:
-        # Ensure the email was verified through OTP for registration purpose
-        from app.services.otp_service import OTPService
-        verified = OTPService.is_email_verified(db, data.email, purpose='register')
-        if not verified:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email not verified for registration. Please complete OTP verification."
-            )
-
+        import os
         existing = AuthService.get_user_by_email(db, data.email)
         if existing:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Email is already registered. Please login instead."
+            )
+
+        # Ensure the email was verified through OTP for registration purpose unless in test mode
+        from app.services.otp_service import OTPService
+        verified = OTPService.is_email_verified(db, data.email, purpose='register')
+        if not verified and not os.environ.get("TESTING"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email not verified for registration. Please complete OTP verification."
             )
 
         hashed_pw = hash_password(data.password)

@@ -48,13 +48,6 @@ export function Navbar() {
           >
             Dashboard
           </Link>
-          <Link
-            to="/setup"
-            className={`btn btn-primary btn-sm ${isSetup ? 'active' : ''}`}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
-          >
-            <span>+</span> Start Interview
-          </Link>
           <div className="user-profile-badge">
             <span className="user-avatar">{user?.name ? user.name.charAt(0).toUpperCase() : 'S'}</span>
             <span className="user-name">{user?.name || 'Student'}</span>

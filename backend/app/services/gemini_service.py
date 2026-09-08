@@ -1,6 +1,8 @@
+import asyncio
 import json
 import logging
 import re
+import time
 from typing import Optional, Dict, Any, Type
 import httpx
 from pydantic import BaseModel
@@ -8,103 +10,137 @@ from app.config import GEMINI_API_KEY, GEMINI_MODEL
 
 logger = logging.getLogger("gemini_service")
 
-# Attempt SDK import if available in runtime environment
-_genai_client = None
-try:
-    from google import genai
-    if GEMINI_API_KEY:
-        _genai_client = genai.Client(api_key=GEMINI_API_KEY)
-        logger.info("Google GenAI SDK client initialized.")
-except Exception as e:
-    logger.debug(f"Google GenAI SDK not initialized directly: {e}")
-
 class GeminiService:
     """
     Centralized service for invoking Google Gemini API with structured JSON validation,
-    strict error handling, timeout recovery, and deterministic offline resilience.
+    fast primary-model execution via direct async REST, at most ONE fallback attempt,
+    duration logging, and strict error reporting without hardcoded templates.
     """
+
+    # Dynamic active model cache (defaults to configured model)
+    _active_model: Optional[str] = None
+
+    # Fallback candidates ordered by speed & availability
+    FALLBACK_CANDIDATES = [
+        "gemini-3.5-flash-lite",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+    ]
 
     @staticmethod
     def is_configured() -> bool:
         return bool(GEMINI_API_KEY and len(GEMINI_API_KEY.strip()) > 5)
+
+    @classmethod
+    def get_active_model(cls) -> str:
+        if cls._active_model:
+            return cls._active_model
+        return GEMINI_MODEL or "gemini-3.5-flash-lite"
+
+    @classmethod
+    def set_active_model(cls, model_name: str) -> None:
+        cls._active_model = model_name
 
     @staticmethod
     async def generate_structured_json(
         prompt: str,
         system_instruction: Optional[str] = None,
         response_model: Optional[Type[BaseModel]] = None,
-        temperature: float = 0.2,
-        timeout_seconds: float = 25.0
+        temperature: float = 0.4,
+        timeout_seconds: float = 15.0,
+        purpose: str = "General Generation"
     ) -> Dict[str, Any]:
         """
-        Sends structured query to Gemini and parses the resulting JSON payload.
-        Ensures output matches expected Pydantic schema or schema structure.
+        Sends structured query to Gemini REST API and parses the resulting JSON payload.
+        Uses primary model directly. If it fails (429/404/503), tries at most ONE fallback model.
+        Logs precise request start, model, duration, and completion.
         """
         if not GeminiService.is_configured():
-            logger.warning("Gemini API key is not configured. Falling back to local NLP heuristics.")
+            logger.error("Gemini API key is not configured in environment (GEMINI_API_KEY is empty).")
             raise ValueError("GEMINI_API_KEY is not configured in backend environment.")
 
-        # 1. Try Google GenAI SDK
-        if _genai_client is not None:
+        # Determine primary model and at most ONE fallback model
+        primary_model = GeminiService.get_active_model()
+        
+        # Pick the best fallback candidate that is different from primary
+        fallback_model = None
+        for cand in GeminiService.FALLBACK_CANDIDATES:
+            if cand != primary_model:
+                fallback_model = cand
+                break
+
+        models_to_try = [primary_model]
+        if fallback_model:
+            models_to_try.append(fallback_model)
+
+        last_error = None
+
+        for attempt_idx, model_name in enumerate(models_to_try):
+            is_fallback_attempt = (attempt_idx > 0)
+            t_start = time.time()
+
+            logger.info(f"[Gemini] request started: purpose={purpose}")
+            logger.info(f"[Gemini] model={model_name}")
+
             try:
-                config_params = {
-                    "temperature": temperature,
-                    "response_mime_type": "application/json",
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
+                payload = {
+                    "contents": [{"parts": [{"text": prompt}]}],
+                    "generationConfig": {
+                        "temperature": temperature,
+                        "responseMimeType": "application/json"
+                    }
                 }
                 if system_instruction:
-                    config_params["system_instruction"] = system_instruction
+                    payload["systemInstruction"] = {"parts": [{"text": system_instruction}]}
 
-                response = _genai_client.models.generate_content(
-                    model=GEMINI_MODEL,
-                    contents=prompt,
-                    config=config_params
-                )
+                async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+                    res = await client.post(url, json=payload)
+                    t_elapsed = time.time() - t_start
 
-                raw_text = response.text if hasattr(response, "text") else str(response)
-                parsed = GeminiService._clean_and_parse_json(raw_text)
-                if response_model:
-                    validated = response_model.parse_obj(parsed)
-                    return validated.dict()
-                return parsed
+                    if res.status_code != 200:
+                        logger.warning(f"[Gemini] request failed: status={res.status_code}")
+                        last_error = ValueError(f"Gemini API returned HTTP {res.status_code} for {model_name}: {res.text[:120]}")
+                        # If primary model failed and fallback exists, try fallback
+                        if not is_fallback_attempt and fallback_model:
+                            if res.status_code == 429:
+                                await asyncio.sleep(0.8)
+                            logger.info(f"[Gemini] Primary model {model_name} failed with status {res.status_code}. Trying single fallback: {fallback_model}...")
+                            continue
+                        break
+
+                    data = res.json()
+                    candidates = data.get("candidates", [])
+                    if not candidates:
+                        logger.warning(f"[Gemini] request failed: status=empty_candidates")
+                        last_error = ValueError(f"Gemini model {model_name} returned empty candidates.")
+                        if not is_fallback_attempt and fallback_model:
+                            continue
+                        break
+
+                    raw_text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+                    parsed = GeminiService._clean_and_parse_json(raw_text)
+                    logger.info(f"[Gemini] request completed: purpose={purpose} duration={t_elapsed:.2f}s")
+
+                    # If fallback succeeded, remember it as active model for future requests
+                    if is_fallback_attempt:
+                        GeminiService.set_active_model(model_name)
+
+                    if response_model:
+                        validated = response_model.parse_obj(parsed)
+                        return validated.dict()
+                    return parsed
             except Exception as e:
-                logger.error(f"GenAI SDK call failed: {str(e)}")
+                t_elapsed = time.time() - t_start
+                logger.warning(f"[Gemini] request failed: error={e} duration={t_elapsed:.2f}s")
+                last_error = e
+                if not is_fallback_attempt and fallback_model:
+                    logger.info(f"[Gemini] Primary model {model_name} error ({e}). Trying single fallback: {fallback_model}...")
+                    continue
+                break
 
-        # 2. Try REST API via httpx
-        try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-            payload = {
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {
-                    "temperature": temperature,
-                    "responseMimeType": "application/json"
-                }
-            }
-            if system_instruction:
-                payload["systemInstruction"] = {"parts": [{"text": system_instruction}]}
-
-            async with httpx.AsyncClient(timeout=timeout_seconds) as client:
-                res = await client.post(url, json=payload)
-                if res.status_code == 400:
-                    raise ValueError("Invalid Gemini API request or key.")
-                elif res.status_code == 429:
-                    raise ValueError("Gemini API rate limit exceeded. Please retry in a few moments.")
-                elif res.status_code != 200:
-                    raise ValueError(f"Gemini API returned status {res.status_code}: {res.text}")
-
-                data = res.json()
-                candidates = data.get("candidates", [])
-                if not candidates:
-                    raise ValueError("Gemini returned an empty candidates response.")
-
-                raw_text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-                parsed = GeminiService._clean_and_parse_json(raw_text)
-                if response_model:
-                    validated = response_model.parse_obj(parsed)
-                    return validated.dict()
-                return parsed
-        except Exception as e:
-            logger.error(f"Gemini REST call failed: {str(e)}")
-            raise e
+        logger.error(f"[Gemini] Generation failed. Last error: {last_error}")
+        raise ValueError(f"Gemini API call failed: {str(last_error)}")
 
     @staticmethod
     def _clean_and_parse_json(raw_text: str) -> Dict[str, Any]:
