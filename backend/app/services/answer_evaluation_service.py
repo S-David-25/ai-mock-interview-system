@@ -55,7 +55,8 @@ class AnswerEvaluationService:
                 result = await GeminiService.generate_structured_json(
                     prompt=prompt,
                     system_instruction=system_instruction,
-                    temperature=0.2
+                    temperature=0.2,
+                    purpose="Technical Evaluation"
                 )
                 corr = max(0.0, min(100.0, float(result.get("correctness", 75.0))))
                 rel = max(0.0, min(100.0, float(result.get("relevance", 75.0))))

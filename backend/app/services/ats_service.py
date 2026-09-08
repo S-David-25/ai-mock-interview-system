@@ -66,18 +66,34 @@ class ATSService:
         project_text = []
         for project in resume.projects or []:
             if isinstance(project, dict):
-                project_text.extend([project.get("name", ""), project.get("description", "")])
+                p_name = project.get("name") or ""
+                p_desc = project.get("description") or ""
+                project_text.extend([str(p_name), str(p_desc)])
+            elif hasattr(project, "name"):
+                project_text.extend([str(getattr(project, "name", "") or ""), str(getattr(project, "description", "") or "")])
+
         experience_text = []
         for exp in resume.experience or []:
             if isinstance(exp, dict):
-                experience_text.extend([exp.get("role", ""), exp.get("company", ""), exp.get("responsibilities", "")])
+                e_role = exp.get("role") or ""
+                e_comp = exp.get("company") or ""
+                e_resp = exp.get("responsibilities") or []
+                if isinstance(e_resp, list):
+                    e_resp = " ".join(str(r) for r in e_resp if r)
+                experience_text.extend([str(e_role), str(e_comp), str(e_resp)])
+            elif hasattr(exp, "role"):
+                e_resp = getattr(exp, "responsibilities", []) or []
+                if isinstance(e_resp, list):
+                    e_resp = " ".join(str(r) for r in e_resp if r)
+                experience_text.extend([str(getattr(exp, "role", "") or ""), str(getattr(exp, "company", "") or ""), str(e_resp)])
+
         resume_text_fields = " ".join(filter(None, [
-            resume.candidate_name,
-            " ".join(resume_skills),
-            " ".join(resume.areas_of_expertise or []),
-            " ".join(resume.soft_skills or []),
-            " ".join(project_text),
-            " ".join(experience_text),
+            str(resume.candidate_name or ""),
+            " ".join(str(s) for s in resume_skills if s),
+            " ".join(str(a) for a in (resume.areas_of_expertise or []) if a),
+            " ".join(str(s) for s in (resume.soft_skills or []) if s),
+            " ".join(str(p) for p in project_text if p),
+            " ".join(str(e) for e in experience_text if e),
         ]))
         resume_text_l = resume_text_fields.lower()
         matched_keywords = []

@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Tuple
+from typing import Tuple, Optional
 from fastapi import UploadFile, HTTPException, status
 from app.config import RESUME_UPLOAD_DIR, JD_UPLOAD_DIR, MAX_FILE_SIZE_BYTES
 from app.database.session import DatabaseSession
@@ -103,6 +103,20 @@ class FileService:
         return refreshed_interview, word_count
 
     @staticmethod
+    def combine_jd_texts(existing_text: Optional[str], new_text: Optional[str]) -> str:
+        existing = (existing_text or "").strip()
+        new_t = (new_text or "").strip()
+        if not existing:
+            return new_t
+        if not new_t:
+            return existing
+        if existing == new_t or new_t in existing:
+            return existing
+        if existing in new_t:
+            return new_t
+        return f"{existing}\n\n--- Additional Job Description Details ---\n\n{new_t}"
+
+    @staticmethod
     async def upload_jd(
         db: DatabaseSession,
         interview_id: int,
@@ -120,6 +134,9 @@ class FileService:
             file, JD_UPLOAD_DIR
         )
 
+        combined_text = FileService.combine_jd_texts(interview.jd_text, text)
+        combined_word_count = len(combined_text.split())
+
         db.execute(
             """
             UPDATE interviews
@@ -129,14 +146,14 @@ class FileService:
                 updated_at = datetime('now', 'utc')
             WHERE id = ?
             """,
-            (secure_name, original_name, text, interview.id)
+            (secure_name, original_name, combined_text, interview.id)
         )
         db.commit()
 
         updated_interview = InterviewService.get_interview_by_id(db, interview_id, user_id)
         InterviewService.evaluate_and_update_status(db, updated_interview)
         refreshed_interview = InterviewService.get_interview_by_id(db, interview_id, user_id)
-        return refreshed_interview, word_count
+        return refreshed_interview, combined_word_count
 
     @staticmethod
     async def submit_jd_text(
@@ -153,7 +170,16 @@ class FileService:
                 detail="Job description submission is only applicable for Company-specific interviews."
             )
 
-        # Persist jd_text
+        if not jd_text or not jd_text.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Job description text cannot be empty."
+            )
+
+        combined_text = FileService.combine_jd_texts(interview.jd_text, jd_text.strip())
+        final_original_name = interview.jd_original_name or original_name
+
+        # Persist jd_text without clearing existing jd_filename if one was uploaded
         db.execute(
             """
             UPDATE interviews
@@ -162,7 +188,7 @@ class FileService:
                 updated_at = datetime('now', 'utc')
             WHERE id = ?
             """,
-            (original_name, jd_text, interview.id)
+            (final_original_name, combined_text, interview.id)
         )
         db.commit()
 

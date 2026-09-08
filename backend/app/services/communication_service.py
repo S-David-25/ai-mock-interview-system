@@ -48,7 +48,8 @@ class CommunicationService:
                 result = await GeminiService.generate_structured_json(
                     prompt=prompt,
                     system_instruction=system_instruction,
-                    temperature=0.2
+                    temperature=0.2,
+                    purpose="Communication Evaluation"
                 )
                 g_score = max(0.0, min(100.0, float(result.get("grammar_score", 75.0))))
                 v_score = max(0.0, min(100.0, float(result.get("vocabulary_score", 75.0))))

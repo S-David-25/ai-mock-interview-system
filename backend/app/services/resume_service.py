@@ -52,7 +52,8 @@ class ResumeService:
                 result = await GeminiService.generate_structured_json(
                     prompt=prompt,
                     system_instruction=system_instruction,
-                    response_model=ResumeProfileSchema
+                    response_model=ResumeProfileSchema,
+                    purpose="Resume Analysis"
                 )
                 return ResumeProfileSchema(**result)
             except Exception as e:
@@ -123,10 +124,16 @@ class ResumeService:
             found_heading = False
             for key, kws in headings.items():
                 for kw in kws:
-                    # exact heading or line that starts with heading
-                    if re.match(rf"^{re.escape(kw)}\b[:\-]?$", lowered) or lowered.startswith(kw + ":") or lowered == kw:
+                    if re.match(rf"^{re.escape(kw)}\b[:\-]?$", lowered) or lowered == kw:
                         curr = key
                         found_heading = True
+                        break
+                    elif lowered.startswith(kw + ":"):
+                        curr = key
+                        found_heading = True
+                        rest = l[len(kw)+1:].strip()
+                        if rest:
+                            sections[curr].append(rest)
                         break
                 if found_heading:
                     break

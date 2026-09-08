@@ -27,6 +27,7 @@ let state = {
   cameraActive: false,
   visionMetrics: null,
   sessionCompleted: false,
+  timeLeft: null,
   reportTab: 'overview',
   compareFirstId: '',
   compareSecondId: '',
@@ -40,6 +41,8 @@ let mediaRecorder = null;
 let audioChunks = [];
 let videoStream = null;
 let visionInterval = null;
+let countdownInterval = null;
+let isCompleting = false;
 
 // API Helpers
 async function apiRequest(endpoint, options = {}) {
@@ -168,16 +171,76 @@ async function fetchComparison(fId, sId) {
   }
 }
 
+function parseUtcExpiresAt(expiresAtStr) {
+  if (!expiresAtStr) return null;
+  const clean = String(expiresAtStr).trim().replace(' ', 'T') + (expiresAtStr.includes('Z') || expiresAtStr.includes('+') || (expiresAtStr.length > 10 && expiresAtStr.slice(10).includes('-')) ? '' : 'Z');
+  const target = new Date(clean).getTime();
+  if (isNaN(target)) return null;
+  return target;
+}
+
+async function handleSessionExpiry() {
+  if (isCompleting) return;
+  isCompleting = true;
+
+  // 1. Cancel TTS
+  stopSpeaking();
+
+  // 2. Stop audio recording
+  stopRecording();
+
+  // 3. Stop camera
+  stopCamera();
+
+  // 4. Clear intervals
+  if (countdownInterval) {
+    clearInterval(countdownInterval);
+    countdownInterval = null;
+  }
+  if (recordingInterval) {
+    clearInterval(recordingInterval);
+    recordingInterval = null;
+  }
+  if (visionInterval) {
+    clearInterval(visionInterval);
+    visionInterval = null;
+  }
+
+  // 5. Complete session in backend
+  try {
+    if (state.activeInterview) {
+      await apiRequest(`/api/interviews/${state.activeInterview.id}/complete`, { method: 'POST' });
+    }
+  } catch (e) {}
+
+  // 6. Transition to completion UI
+  state.sessionCompleted = true;
+  render();
+}
+
 async function initInterviewSession(id) {
   if (!state.token) return;
   state.loading = true;
   state.sessionCompleted = false;
   state.lastFeedback = null;
   state.isFollowUpAlert = false;
+  isCompleting = false;
   render();
 
   try {
-    const intData = await apiRequest(`/api/interviews/${id}`);
+    let intData = await apiRequest(`/api/interviews/${id}`);
+
+    if (intData.status === 'completed') {
+      state.activeInterview = intData;
+      state.sessionCompleted = true;
+      state.loading = false;
+      render();
+      return;
+    }
+
+    if (intData.status === 'ready' || intData.status === 'in_progress') {
+      intData = await apiRequest(`/api/interviews/${id}/start`, { method: 'POST' });
+    }
     state.activeInterview = intData;
 
     if (!intData.resume_analysis) {
@@ -198,16 +261,56 @@ async function initInterviewSession(id) {
       state.sessionCompleted = true;
     }
 
-    if (intData.status === 'ready') {
-      await apiRequest(`/api/interviews/${id}/start`, { method: 'POST' });
+    // Countdown Timer Setup
+    const targetTime = parseUtcExpiresAt(intData.expires_at);
+    let initialRemaining = 0;
+    if (targetTime) {
+      initialRemaining = Math.max(0, Math.floor((targetTime - Date.now()) / 1000));
+    } else {
+      initialRemaining = (intData.duration_minutes || 30) * 60;
     }
+    state.timeLeft = initialRemaining;
+
+    if (initialRemaining <= 0) {
+      handleSessionExpiry();
+      return;
+    }
+
+    if (countdownInterval) clearInterval(countdownInterval);
+    countdownInterval = setInterval(() => {
+      if (targetTime) {
+        const rem = Math.max(0, Math.floor((targetTime - Date.now()) / 1000));
+        state.timeLeft = rem;
+        const timerEl = document.getElementById('sessionTimerBadge');
+        if (timerEl) {
+          timerEl.innerHTML = `⏱️ ${formatDuration(rem)}`;
+          if (rem <= 60) timerEl.classList.add('timer-warning', 'pulse-fast');
+        }
+        if (rem <= 0) {
+          clearInterval(countdownInterval);
+          handleSessionExpiry();
+        }
+      } else {
+        if (state.timeLeft <= 1) {
+          clearInterval(countdownInterval);
+          handleSessionExpiry();
+        } else {
+          state.timeLeft -= 1;
+          const timerEl = document.getElementById('sessionTimerBadge');
+          if (timerEl) {
+            timerEl.innerHTML = `⏱️ ${formatDuration(state.timeLeft)}`;
+            if (state.timeLeft <= 60) timerEl.classList.add('timer-warning', 'pulse-fast');
+          }
+        }
+      }
+    }, 1000);
 
   } catch (err) {
     state.error = err.message;
   } finally {
     state.loading = false;
     render();
-    if (state.currentQuestion) {
+    if (state.currentQuestion && !state.sessionCompleted) {
       speakQuestion(state.currentQuestion.question);
     }
   }
@@ -394,39 +497,42 @@ async function submitAnswerPayload(ansText, audioFile, duration) {
   const intId = state.activeInterview.id;
   const qId = state.currentQuestion.id;
 
-  const res = await apiRequest(`/api/interviews/${intId}/answer`, {
-    method: 'POST',
-    body: {
-      question_id: qId,
-      transcript: ansText,
-      speaking_duration: duration,
-      audio_filename: audioFile
+  try {
+    const res = await apiRequest(`/api/interviews/${intId}/answer`, {
+      method: 'POST',
+      body: {
+        question_id: qId,
+        transcript: ansText,
+        speaking_duration: duration,
+        audio_filename: audioFile
+      }
+    });
+
+    state.lastFeedback = {
+      technical: res.technical_evaluation,
+      communication: res.communication_evaluation,
+      fluency: res.fluency_evaluation,
+    };
+
+    if (res.is_completed) {
+      handleSessionExpiry();
+    } else if (res.next_question) {
+      if (!state.questions) state.questions = [];
+      if (!state.questions.some(q => q.id === res.next_question.id)) {
+        state.questions.push(res.next_question);
+      }
+      state.isFollowUpAlert = Boolean(res.is_follow_up);
+      state.currentQuestion = res.next_question;
+      state.currentQuestionIndex = (state.currentQuestionIndex || 0) + 1;
+      state.transcript = '';
+      speakQuestion(res.next_question.question);
     }
-  });
-
-  state.lastFeedback = {
-    technical: res.technical_evaluation,
-    communication: res.communication_evaluation,
-    fluency: res.fluency_evaluation,
-  };
-
-  if (res.is_follow_up && res.next_question) {
-    state.isFollowUpAlert = true;
-    state.currentQuestion = res.next_question;
-    state.transcript = '';
-    speakQuestion(res.next_question.question);
-  } else if (res.is_completed) {
-    state.sessionCompleted = true;
-    // Auto-generate report
-    try {
-      await apiRequest(`/api/interviews/${intId}/generate-report`, { method: 'POST' });
-    } catch (e) {}
-  } else if (res.next_question) {
-    state.isFollowUpAlert = false;
-    state.currentQuestion = res.next_question;
-    state.currentQuestionIndex += 1;
-    state.transcript = '';
-    speakQuestion(res.next_question.question);
+  } catch (err) {
+    if (err.message && err.message.toLowerCase().includes('expired')) {
+      handleSessionExpiry();
+    } else {
+      throw err;
+    }
   }
 }
 
@@ -434,11 +540,29 @@ async function submitAnswerPayload(ansText, audioFile, duration) {
 function formatDate(dStr) {
   if (!dStr) return 'N/A';
   try {
-    const d = new Date(dStr.endsWith('Z') ? dStr : dStr + 'Z');
-    return d.toLocaleDateString('en-US', {
+    let clean = String(dStr).trim().replace(' ', 'T');
+    if (!clean.endsWith('Z') && !clean.includes('+') && !clean.slice(10).includes('-')) {
+      clean += 'Z';
+    }
+    const d = new Date(clean);
+    if (isNaN(d.getTime())) return dStr;
+    return d.toLocaleDateString(undefined, {
       month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit'
     });
   } catch(e) { return dStr; }
+}
+
+function formatDuration(seconds) {
+  if (seconds === null || seconds === undefined || isNaN(seconds) || seconds < 0) return '00:00';
+  const totalSec = Math.floor(seconds);
+  const mins = Math.floor(totalSec / 60);
+  const secs = totalSec % 60;
+  if (mins >= 60) {
+    const hrs = Math.floor(mins / 60);
+    const remMins = mins % 60;
+    return `${String(hrs).padStart(2, '0')}:${String(remMins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  }
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
 function getStatusBadge(status) {
@@ -840,6 +964,30 @@ function renderSetup() {
           </div>
         </div>
 
+        <div class="form-section">
+          <label class="section-label">Choose Interview Duration</label>
+          <div class="duration-selector-grid">
+            ${[
+              { val: 1, label: '1 min', desc: '1 minute — TESTING' },
+              { val: 20, label: '20 mins', desc: '20 minutes' },
+              { val: 30, label: '30 mins', desc: '30 minutes (Standard)' },
+              { val: 45, label: '45 mins', desc: '45 minutes' },
+              { val: 60, label: '60 mins', desc: '60 minutes' },
+              { val: 90, label: '90 mins', desc: '90 minutes' },
+            ].map(opt => `
+              <div class="duration-card ${selectedDuration === opt.val ? 'selected' : ''}" data-duration="${opt.val}" onclick="selectDuration(${opt.val})">
+                <div class="duration-card-radio">
+                  <input type="radio" name="setup_duration" ${selectedDuration === opt.val ? 'checked' : ''} />
+                </div>
+                <div class="duration-card-content">
+                  <span class="duration-tag">${opt.label}</span>
+                  <span class="duration-name">${opt.desc}</span>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+
         <div id="companyFields" class="form-section company-fields-box">
           <h3 class="sub-section-title">Company & Target Role Details</h3>
           <div class="form-grid-2">
@@ -854,11 +1002,17 @@ function renderSetup() {
           </div>
 
           <div style="margin-top:1.25rem;">
-            <label class="file-uploader-label">Upload Job Description (JD) *</label>
+            <label class="section-label">Job Description (Paste or Upload)</label>
+            <textarea
+              id="setupJdText"
+              placeholder="Paste the full Job Description text here (preferred)"
+              rows="6"
+              style="width:100%;padding:0.75rem;border-radius:6px;border:1px solid #e2e8f0;margin-bottom:0.75rem;"
+            ></textarea>
             <div class="file-dropzone" onclick="document.getElementById('jdFileInput').click()">
               <input id="jdFileInput" type="file" accept=".pdf,.docx" style="display:none" onchange="handleFileChange(this, 'jd')" />
               <div class="dropzone-icon">📋</div>
-              <p class="dropzone-primary-text" id="jdFileLabel"><strong>Click to upload Job Description</strong> (PDF or DOCX, max 10MB)</p>
+              <p class="dropzone-primary-text" id="jdFileLabel"><strong>Or upload Job Description</strong> (PDF or DOCX, max 10MB)</p>
             </div>
           </div>
         </div>
@@ -938,7 +1092,7 @@ function renderInterviewDetail() {
           </div>
 
           <div class="status-callout" style="margin-top:1.5rem;">
-            <strong>Session Status:</strong> ${statusData?.message || 'Ready for AI interview phase.'}
+            <strong>Session Status:</strong> ${i.status === 'completed' ? 'Interview Completed. Performance report ready.' : (statusData?.message || 'Ready for AI interview phase.')}
           </div>
         </div>
 
@@ -955,7 +1109,7 @@ function renderInterviewDetail() {
               </button>
             ` : `
               <button class="btn btn-primary btn-block btn-lg shadow-glow" ${!statusData?.is_ready ? 'disabled' : ''} onclick="navigate('interviews/${i.id}/session')">
-                ${statusData?.is_ready ? '🎙️ Launch AI Voice Interview Session ➔' : '⚠️ Upload Required Documents First'}
+                ${i.status === 'in_progress' ? '🎙️ Resume AI Voice Interview Session ➔' : (statusData?.is_ready ? '🎙️ Launch AI Voice Interview Session ➔' : '⚠️ Upload Required Documents First')}
               </button>
             `}
           </div>
@@ -977,16 +1131,18 @@ function renderInterviewSession() {
       <div class="session-completed-card">
         <div class="completed-icon">🎉</div>
         <h1 class="completed-title">Mock Interview Completed!</h1>
-        <p class="completed-subtitle">Great job! All technical and situational questions have been answered and evaluated across multi-modal benchmarks.</p>
+        <p class="completed-subtitle">Great job! Your interview session has terminated and multi-modal evaluations are finalized.</p>
         <div class="completed-summary-box">
           <h3>Session Summary (Session #${i.id})</h3>
           <p><strong>Candidate:</strong> ${state.user?.name || 'Candidate'}</p>
           <p><strong>Interview Type:</strong> ${i.interview_type === 'company' ? `${i.company_name} — ${i.job_role}` : 'General Placement Mock'}</p>
+          <p><strong>Duration Selected:</strong> ${i.duration_minutes || 30} minutes</p>
           <p><strong>Questions Evaluated:</strong> ${state.questions.length} questions</p>
         </div>
-        <div style="margin-top:2rem;display:flex;gap:1rem;justify-content:center;">
-          <button onclick="navigate('interviews/${i.id}/report')" class="btn btn-primary btn-lg shadow-glow">📊 View Official Performance Report</button>
-          <button onclick="navigate('dashboard')" class="btn btn-secondary btn-lg">Return to Dashboard</button>
+        <div style="margin-top:2rem;display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;">
+          <button onclick="navigate('dashboard')" class="btn btn-primary btn-lg">Return to Dashboard</button>
+          <button onclick="navigate('interviews/${i.id}')" class="btn btn-secondary btn-lg">View Session Details</button>
+          <button onclick="navigate('interviews/${i.id}/report')" class="btn btn-primary btn-lg shadow-glow">📊 View Performance Report</button>
         </div>
       </div>
     `;
@@ -1001,6 +1157,9 @@ function renderInterviewSession() {
         <div class="session-info">
           <span class="session-type-pill">${isCompany ? `🏢 ${i.company_name} • ${i.job_role}` : '🌐 General Placement Interview'}</span>
           <span class="question-counter-badge">Question ${state.currentQuestionIndex + 1} ${q?.source === 'FOLLOW_UP' ? '(Dynamic Follow-up)' : `of ${state.questions.length}`}</span>
+          <span id="sessionTimerBadge" class="timer-badge ${state.timeLeft !== null && state.timeLeft <= 60 ? 'timer-warning pulse-fast' : ''}">
+            ⏱️ ${formatDuration(state.timeLeft !== null ? state.timeLeft : (i.duration_minutes || 30) * 60)}
+          </span>
         </div>
         <div class="session-actions">
           <button onclick="toggleCamera()" class="btn btn-sm ${state.cameraActive ? 'btn-danger' : 'btn-secondary'}">
@@ -1514,6 +1673,7 @@ function render() {
 
 // Handlers
 let selectedType = 'company';
+let selectedDuration = 30;
 let selectedFiles = { resume: null, jd: null };
 
 function selectType(t) {
@@ -1535,6 +1695,21 @@ function selectType(t) {
     if (compFields) compFields.style.display = 'none';
     if (genRadio) genRadio.checked = true;
   }
+}
+
+function selectDuration(mins) {
+  selectedDuration = mins;
+  document.querySelectorAll('.duration-card').forEach(c => {
+    if (parseInt(c.getAttribute('data-duration')) === mins) {
+      c.classList.add('selected');
+      const r = c.querySelector('input[type="radio"]');
+      if (r) r.checked = true;
+    } else {
+      c.classList.remove('selected');
+      const r = c.querySelector('input[type="radio"]');
+      if (r) r.checked = false;
+    }
+  });
 }
 
 function handleFileChange(input, type) {
@@ -1614,10 +1789,18 @@ async function handleSetupSubmit(e) {
   const company = selectedType === 'company' ? (document.getElementById('setupCompany')?.value || '').trim() : null;
   const role = selectedType === 'company' ? (document.getElementById('setupRole')?.value || '').trim() : null;
 
+  const jdText = (document.getElementById('setupJdText')?.value || '').trim();
+  const hasJdText = Boolean(jdText);
+  const hasJdFile = Boolean(selectedFiles.jd);
+
   if (selectedType === 'company') {
     if (!company) { state.error = 'Please enter company name.'; render(); return; }
     if (!role) { state.error = 'Please enter target job role.'; render(); return; }
-    if (!selectedFiles.jd) { state.error = 'Please select a Job Description (PDF/DOCX).'; render(); return; }
+    if (!hasJdText && !hasJdFile) {
+      state.error = 'Please provide a Job Description by pasting text or uploading a PDF/DOCX file.';
+      render();
+      return;
+    }
     if (!selectedFiles.resume) { state.error = 'Please select a Resume (PDF/DOCX).'; render(); return; }
   } else {
     if (!selectedFiles.resume) { state.error = 'Please select your Resume (PDF/DOCX).'; render(); return; }
@@ -1637,23 +1820,48 @@ async function handleSetupSubmit(e) {
       body: {
         interview_type: selectedType,
         company_name: company,
-        job_role: role
+        job_role: role,
+        duration_minutes: selectedDuration || 30
       }
     });
 
     const intId = intData.id;
 
-    if (selectedType === 'company' && selectedFiles.jd) {
-      if (pText) pText.innerText = 'Step 2/3: Uploading & extracting Job Description...';
-      const jdForm = new FormData();
-      jdForm.append('file', selectedFiles.jd);
-      await apiRequest(`/api/interviews/${intId}/upload-jd`, {
-        method: 'POST',
-        body: jdForm
-      });
+    if (selectedType === 'company') {
+      if (hasJdText && hasJdFile) {
+        if (pText) pText.innerText = 'Step 2/4: Saving pasted Job Description and uploading JD file...';
+        const textForm = new FormData();
+        textForm.append('jd_text', jdText);
+        await apiRequest(`/api/interviews/${intId}/submit-jd`, {
+          method: 'POST',
+          body: textForm
+        });
+        const jdForm = new FormData();
+        jdForm.append('file', selectedFiles.jd);
+        await apiRequest(`/api/interviews/${intId}/upload-jd`, {
+          method: 'POST',
+          body: jdForm
+        });
+      } else if (hasJdText) {
+        if (pText) pText.innerText = 'Step 2/4: Saving pasted Job Description...';
+        const textForm = new FormData();
+        textForm.append('jd_text', jdText);
+        await apiRequest(`/api/interviews/${intId}/submit-jd`, {
+          method: 'POST',
+          body: textForm
+        });
+      } else if (hasJdFile) {
+        if (pText) pText.innerText = 'Step 2/4: Uploading & extracting Job Description...';
+        const jdForm = new FormData();
+        jdForm.append('file', selectedFiles.jd);
+        await apiRequest(`/api/interviews/${intId}/upload-jd`, {
+          method: 'POST',
+          body: jdForm
+        });
+      }
     }
 
-    if (pText) pText.innerText = 'Step 3/3: Uploading & parsing Candidate Resume...';
+    if (pText) pText.innerText = 'Step 3/4: Uploading & parsing Candidate Resume...';
     const resForm = new FormData();
     resForm.append('file', selectedFiles.resume);
     await apiRequest(`/api/interviews/${intId}/upload-resume`, {

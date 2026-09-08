@@ -2182,6 +2182,87 @@ body {
 .status-pill.declined { background: #fee2e2; color: #b91c1c; }
 .status-pill.unchanged { background: #f1f5f9; color: #64748b; }
 
+/* Interview Timer & Duration Selector Styles */
+.timer-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: #f1f5f9;
+  color: #0f172a;
+  padding: 0.35rem 0.85rem;
+  border-radius: 9999px;
+  font-weight: 700;
+  font-size: 0.95rem;
+  font-family: 'JetBrains Mono', monospace, sans-serif;
+  border: 1px solid #cbd5e1;
+  transition: all 0.2s ease;
+}
+
+.timer-badge.timer-warning {
+  background: #fee2e2;
+  color: #b91c1c;
+  border-color: #fca5a5;
+  box-shadow: 0 0 10px rgba(220, 38, 38, 0.3);
+}
+
+@keyframes pulse-fast {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.05); opacity: 0.85; }
+}
+
+.pulse-fast {
+  animation: pulse-fast 1s infinite ease-in-out;
+}
+
+.duration-selector-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.85rem;
+  margin-top: 0.5rem;
+}
+
+.duration-card {
+  border: 1.5px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 0.85rem 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  cursor: pointer;
+  background: var(--bg-surface);
+  transition: all 0.2s ease;
+}
+
+.duration-card:hover {
+  border-color: var(--primary);
+  background: #f8fafc;
+}
+
+.duration-card.selected {
+  border-color: var(--primary);
+  background: var(--primary-light);
+  box-shadow: 0 0 0 1px var(--primary);
+}
+
+.duration-card-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.duration-tag {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--primary);
+  text-transform: uppercase;
+}
+
+.duration-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
 @media (max-width: 768px) {
   .report-title-row, .comparison-selector-bar, .comparison-delta-banner, .grid-2-col {
     flex-direction: column;

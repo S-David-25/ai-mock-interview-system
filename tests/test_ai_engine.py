@@ -95,29 +95,24 @@ class TestAIEngineServices(unittest.TestCase):
         )
         match = SkillMatchingService.match_skills(resume, jd)
 
-        questions = asyncio.run(QuestionService.generate_initial_questions(
+        q1 = asyncio.run(QuestionService.generate_initial_question(
             interview_id=1,
             interview_type="company",
             company_name="Amazon",
             job_role="Cloud Engineer",
             resume=resume,
             jd=jd,
-            skill_match=match,
-            num_questions=5
+            skill_match=match
         ))
 
-        self.assertEqual(len(questions), 5)
-        categories = [q.category for q in questions]
-        self.assertIn("PROJECT", categories)
-        self.assertIn("TECHNICAL", categories)
-        self.assertIn("BEHAVIORAL", categories)
+        self.assertIsInstance(q1, QuestionSchema)
+        self.assertEqual(q1.order_number, 1)
+        self.assertEqual(q1.status, "pending")
+        self.assertGreater(len(q1.question), 10)
+        self.assertIn(q1.difficulty, ["EASY", "MEDIUM", "HARD"])
+        self.assertTrue(len(q1.expected_focus) > 0)
 
-        for q in questions:
-            self.assertGreater(len(q.question), 10)
-            self.assertIn(q.difficulty, ["EASY", "MEDIUM", "HARD"])
-            self.assertTrue(len(q.expected_focus) > 0)
-
-    def test_05_dynamic_follow_up_generation(self):
+    def test_05_dynamic_follow_up_and_next_question_generation(self):
         parent_q = QuestionSchema(
             id=1,
             interview_id=1,
@@ -128,30 +123,76 @@ class TestAIEngineServices(unittest.TestCase):
             source="RESUME",
             order_number=1
         )
-        candidate_ans = "I used FastAPI for backend REST API endpoints, PostgreSQL for database transactions, and React for the frontend interface."
+        resume = ResumeProfileSchema(
+            candidate_name="Alex",
+            technical_skills=["Python", "FastAPI", "PostgreSQL", "Docker"],
+            programming_languages=["Python"],
+            frameworks=["FastAPI"],
+            databases=["PostgreSQL"],
+            projects=[{"name": "AI Smart Parking System", "description": None, "technologies": [], "responsibilities": [], "outcomes": []}]
+        )
+        jd = JDProfileSchema(
+            company="Amazon",
+            job_role="Cloud Engineer",
+            required_skills=["Python", "AWS", "Docker"]
+        )
+        match = SkillMatchingService.match_skills(resume, jd)
 
-        follow_up = asyncio.run(QuestionService.generate_dynamic_follow_up(
-            interview_id=1,
-            parent_question=parent_q,
-            candidate_answer=candidate_ans,
-            topic_follow_up_count=0,
-            total_questions_asked=1,
-            job_role="Backend Developer"
+        # 1. Brief / Incomplete answer triggers dynamic follow-up
+        brief_ans = "I used FastAPI."
+        tech_eval_brief = asyncio.run(AnswerEvaluationService.evaluate_technical_answer(
+            parent_q.question, parent_q.category, parent_q.expected_focus, brief_ans, "Cloud Engineer"
         ))
 
-        self.assertIsNotNone(follow_up)
-        self.assertEqual(follow_up.source, "FOLLOW_UP")
-        self.assertGreater(len(follow_up.question), 10)
-
-        # Test limit reached (max follow-ups per topic)
-        follow_up_limited = asyncio.run(QuestionService.generate_dynamic_follow_up(
+        follow_up_q, is_fu = asyncio.run(QuestionService.generate_next_question_or_follow_up(
             interview_id=1,
-            parent_question=parent_q,
-            candidate_answer=candidate_ans,
-            topic_follow_up_count=3,
-            total_questions_asked=1
+            interview_type="company",
+            company_name="Amazon",
+            job_role="Cloud Engineer",
+            resume=resume,
+            jd=jd,
+            skill_match=match,
+            previous_questions=[parent_q.dict()],
+            previous_answers=[{"transcript_text": brief_ans}],
+            latest_question=parent_q,
+            latest_answer=brief_ans,
+            latest_eval=tech_eval_brief,
+            remaining_time_seconds=1200,
+            current_order_number=1
         ))
-        self.assertIsNone(follow_up_limited)
+
+        self.assertIsInstance(follow_up_q, QuestionSchema)
+        self.assertEqual(follow_up_q.order_number, 2)
+        self.assertTrue(is_fu)
+        self.assertEqual(follow_up_q.source, "FOLLOW_UP")
+        self.assertGreater(len(follow_up_q.question), 10)
+
+        # 2. Comprehensive answer triggers next diverse question topic
+        detailed_ans = "We designed the AI Smart Parking System with FastAPI asynchronous worker endpoints, PostgreSQL with B-tree indexing for vehicle lookup, and Docker containers deployed to AWS ECS."
+        tech_eval_detailed = asyncio.run(AnswerEvaluationService.evaluate_technical_answer(
+            parent_q.question, parent_q.category, parent_q.expected_focus, detailed_ans, "Cloud Engineer"
+        ))
+
+        next_q, is_fu_next = asyncio.run(QuestionService.generate_next_question_or_follow_up(
+            interview_id=1,
+            interview_type="company",
+            company_name="Amazon",
+            job_role="Cloud Engineer",
+            resume=resume,
+            jd=jd,
+            skill_match=match,
+            previous_questions=[parent_q.dict(), follow_up_q.dict()],
+            previous_answers=[{"transcript_text": brief_ans}, {"transcript_text": detailed_ans}],
+            latest_question=follow_up_q,
+            latest_answer=detailed_ans,
+            latest_eval=tech_eval_detailed,
+            remaining_time_seconds=1100,
+            current_order_number=2
+        ))
+
+        self.assertIsInstance(next_q, QuestionSchema)
+        self.assertEqual(next_q.order_number, 3)
+        self.assertGreater(len(next_q.question), 10)
 
     def test_06_fluency_analysis(self):
         transcript_clean = "We designed the microservices architecture using Docker containers and deployed it to AWS with high availability."

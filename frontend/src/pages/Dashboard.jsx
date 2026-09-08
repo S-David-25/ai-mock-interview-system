@@ -107,61 +107,7 @@ export function Dashboard() {
         />
       </section>
 
-      {/* Longitudinal Progress Trends Section (Master Prompt 3) */}
-      {progress && progress.trend_data && progress.trend_data.length > 0 && (
-        <section className="progress-trends-card" style={{ marginBottom: '2.5rem' }}>
-          <div className="section-header">
-            <div>
-              <h2 className="section-title">📈 Longitudinal Progress Trends</h2>
-              <p className="section-subtitle">Score improvement trajectories across completed mock interviews</p>
-            </div>
-            {progress.trend_data.length >= 2 && (
-              <Link to="/interviews/compare" className="btn btn-secondary btn-sm">
-                🔍 Compare Sessions Side-by-Side
-              </Link>
-            )}
-          </div>
 
-          <div className="progress-trajectory-grid">
-            {progress.trend_data.map((item, idx) => (
-              <div key={item.interview_id} className="trend-point-card">
-                <div className="trend-card-top">
-                  <span className="session-index-pill">Session #{item.interview_id}</span>
-                  <span className="trend-date">{formatDate(item.date)}</span>
-                </div>
-                <div className="trend-score-large">{item.overall_score}%</div>
-                <div className="trend-company-name">
-                  {item.company_name ? `🏢 ${item.company_name}` : '🌐 General Mock'}
-                </div>
-
-                <div className="sub-scores-mini-row">
-                  <span>Tech: {item.technical_score}%</span>
-                  <span>Comm: {item.communication_score}%</span>
-                  <span>Fluency: {item.fluency_score}%</span>
-                </div>
-
-                <Link to={`/interviews/${item.interview_id}/report`} className="btn btn-outline btn-sm btn-block" style={{ marginTop: '0.75rem' }}>
-                  📊 View Full Report
-                </Link>
-              </div>
-            ))}
-          </div>
-
-          {progress.category_trends && progress.category_trends.length > 0 && (
-            <div className="category-trends-row">
-              {progress.category_trends.map((cat, idx) => (
-                <div key={idx} className="category-delta-box">
-                  <span className="cat-name">{cat.category_name}</span>
-                  <span className="cat-scores">{cat.initial_score}% ➔ {cat.latest_score}%</span>
-                  <span className={`cat-delta ${cat.delta >= 0 ? 'pos' : 'neg'}`}>
-                    {cat.delta >= 0 ? `+${cat.delta}%` : `${cat.delta}%`}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-      )}
 
       {/* Interviews Section */}
       <section className="interviews-section">
@@ -170,14 +116,11 @@ export function Dashboard() {
             <h2 className="section-title">Interview History & Sessions</h2>
             <p className="section-subtitle">Manage your active and completed mock interviews</p>
           </div>
-          <button
-            onClick={fetchDashboardData}
-            className="btn btn-secondary btn-sm"
-            disabled={isLoading}
-            title="Refresh list"
-          >
-            🔄 Refresh
-          </button>
+          {interviews.length >= 2 && (
+            <Link to="/interviews/compare" className="btn btn-secondary btn-sm">
+              🔍 Compare Sessions Side-by-Side
+            </Link>
+          )}
         </div>
 
         {isLoading ? (

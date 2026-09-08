@@ -10,8 +10,14 @@ def create_sample_pdf_bytes(text: str) -> bytes:
     pdf.add_page()
     pdf.set_font("helvetica", size=12)
     for line in text.split('\n'):
-        pdf.cell(w=200, h=10, text=line, new_x="LMARGIN", new_y="NEXT")
-    out = pdf.output()
+        try:
+            pdf.cell(w=200, h=10, txt=line, ln=1)
+        except TypeError:
+            pdf.cell(w=200, h=10, text=line)
+    try:
+        out = pdf.output(dest='S')
+    except Exception:
+        out = pdf.output()
     if isinstance(out, (bytes, bytearray)):
         return bytes(out)
     return out.encode('latin-1')
@@ -85,20 +91,21 @@ class TestInterviewEngineEndpoints(unittest.TestCase):
         self.assertIn("Python", proc_data["resume_analysis"]["technical_skills"])
         self.assertIn("Azure", proc_data["skill_match"]["skill_gaps"])
 
-        # 4. Question Generation Endpoint
+        # 4. Question Generation Endpoint (Generates Question 1 dynamically)
         res_qgen = self.client.post(f"/api/interviews/{int_id}/generate-questions", headers=self.headers1)
         self.assertEqual(res_qgen.status_code, 200)
         q_data = res_qgen.json()
-        self.assertEqual(q_data["total_questions"], 5)
+        self.assertEqual(q_data["total_questions"], 1)
         questions = q_data["questions"]
         first_q = questions[0]
         self.assertIn("id", first_q)
-        self.assertIn(first_q["category"], ["PROJECT", "TECHNICAL", "SKILL_GAP", "BEHAVIORAL", "SITUATIONAL"])
+        self.assertEqual(first_q["order_number"], 1)
+        self.assertEqual(first_q["status"], "pending")
 
         # 5. List Questions Endpoint
         res_qlist = self.client.get(f"/api/interviews/{int_id}/questions", headers=self.headers1)
         self.assertEqual(res_qlist.status_code, 200)
-        self.assertEqual(res_qlist.json()["total_questions"], 5)
+        self.assertEqual(res_qlist.json()["total_questions"], 1)
 
         # 6. Start Interview Session
         res_start = self.client.post(f"/api/interviews/{int_id}/start", headers=self.headers1)

@@ -2,11 +2,12 @@ import { api } from './api';
 
 export const interviewService = {
   // Master Prompt 1: Setup & Management
-  async createInterview({ interview_type, company_name, job_role }) {
+  async createInterview({ interview_type, company_name, job_role, duration_minutes = 30 }) {
     return await api.post('/api/interviews', {
       interview_type,
       company_name: interview_type === 'company' ? company_name : null,
       job_role: interview_type === 'company' ? job_role : null,
+      duration_minutes: Number(duration_minutes) || 30,
     });
   },
 
