@@ -235,9 +235,6 @@ export function InterviewSession() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 480, height: 360 } });
         videoStreamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-        }
         setCameraActive(true);
 
         // Start periodic frame capture for vision evaluation
@@ -248,7 +245,33 @@ export function InterviewSession() {
     }
   };
 
+  useEffect(() => {
+    const video = videoRef.current;
+    const stream = videoStreamRef.current;
+    if (!video || !stream || !cameraActive) return;
+
+    video.srcObject = stream;
+    const playVideo = () => {
+      video.play().catch(() => {
+        setError('The camera is enabled, but the live preview could not start.');
+      });
+    };
+
+    video.onloadedmetadata = playVideo;
+    if (video.readyState >= 1) playVideo();
+
+    return () => {
+      if (video.onloadedmetadata === playVideo) {
+        video.onloadedmetadata = null;
+      }
+    };
+  }, [cameraActive]);
+
   const stopCamera = () => {
+    if (videoRef.current) {
+      videoRef.current.pause();
+      videoRef.current.srcObject = null;
+    }
     if (videoStreamRef.current) {
       videoStreamRef.current.getTracks().forEach(track => track.stop());
       videoStreamRef.current = null;
