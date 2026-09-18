@@ -5,6 +5,8 @@ import { LoadingSpinner } from '../components/LoadingSpinner';
 import { Alert } from '../components/Alert';
 import { formatDuration } from '../utils/formatters';
 
+const ANSWER_SILENCE_WINDOW_MS = 2000;
+
 export function InterviewSession() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -14,6 +16,7 @@ export function InterviewSession() {
   const [questions, setQuestions] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [currentQuestion, setCurrentQuestion] = useState(null);
+  const [pendingQuestion, setPendingQuestion] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [sessionCompleted, setSessionCompleted] = useState(false);
@@ -24,7 +27,6 @@ export function InterviewSession() {
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [transcript, setTranscript] = useState('');
   const [isProcessingAnswer, setIsProcessingAnswer] = useState(false);
-  const [lastFeedback, setLastFeedback] = useState(null);
   const [isFollowUpAlert, setIsFollowUpAlert] = useState(false);
 
   // TTS State
@@ -34,11 +36,22 @@ export function InterviewSession() {
   // Webcam State
   const [cameraActive, setCameraActive] = useState(false);
   const [visionMetrics, setVisionMetrics] = useState(null);
+  const [faceCount, setFaceCount] = useState(0);
+  const [expressionLabel, setExpressionLabel] = useState('Not Detected');
+  const [interviewStarted, setInterviewStarted] = useState(false);
 
   // Refs
   const mediaRecorderRef = useRef(null);
+  const isRecordingRef = useRef(false);
   const audioChunksRef = useRef([]);
   const recordingTimerRef = useRef(null);
+  const silenceTimerRef = useRef(null);
+  const silenceCheckRef = useRef(null);
+  const audioContextRef = useRef(null);
+  const hasSpokenRef = useRef(false);
+  const expressionLabelRef = useRef('Not Detected');
+  const expressionHistoryRef = useRef([]);
+  const ttsSequenceRef = useRef(0);
   const videoRef = useRef(null);
   const videoStreamRef = useRef(null);
   const visionIntervalRef = useRef(null);
@@ -70,6 +83,7 @@ export function InterviewSession() {
       } catch (e) {}
     }
     setIsRecording(false);
+    isRecordingRef.current = false;
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current);
       recordingTimerRef.current = null;
@@ -120,7 +134,7 @@ export function InterviewSession() {
         }
 
         // Start session if ready or in_progress to establish server-authoritative expires_at
-        if (intData.status === 'ready' || intData.status === 'in_progress') {
+        if (intData.status === 'in_progress') {
           intData = await interviewService.startInterview(id);
         }
         setInterview(intData);
@@ -137,46 +151,10 @@ export function InterviewSession() {
         const pendingIdx = (qData.questions || []).findIndex(q => q.status === 'pending');
         if (pendingIdx !== -1) {
           setCurrentIndex(pendingIdx);
-          setCurrentQuestion(qData.questions[pendingIdx]);
+          setPendingQuestion(qData.questions[pendingIdx]);
         } else if (qData.questions && qData.questions.length > 0) {
           setSessionCompleted(true);
         }
-
-        // Setup Countdown Timer
-        const targetTime = parseUtcExpiresAt(intData.expires_at);
-        let initialRemaining = 0;
-        if (targetTime) {
-          initialRemaining = Math.max(0, Math.floor((targetTime - Date.now()) / 1000));
-        } else {
-          initialRemaining = (intData.duration_minutes || 30) * 60;
-        }
-        setTimeLeft(initialRemaining);
-
-        if (initialRemaining <= 0) {
-          handleExpireAndComplete();
-          return;
-        }
-
-        if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
-        countdownIntervalRef.current = setInterval(() => {
-          if (targetTime) {
-            const rem = Math.max(0, Math.floor((targetTime - Date.now()) / 1000));
-            setTimeLeft(rem);
-            if (rem <= 0) {
-              clearInterval(countdownIntervalRef.current);
-              handleExpireAndComplete();
-            }
-          } else {
-            setTimeLeft(prev => {
-              if (prev === null || prev <= 1) {
-                clearInterval(countdownIntervalRef.current);
-                handleExpireAndComplete();
-                return 0;
-              }
-              return prev - 1;
-            });
-          }
-        }, 1000);
 
       } catch (err) {
         setError(err.message || 'Failed to initialize AI interview session.');
@@ -201,49 +179,97 @@ export function InterviewSession() {
     };
   }, [id]);
 
+  const startCountdown = (interviewData) => {
+    const targetTime = parseUtcExpiresAt(interviewData.expires_at);
+    const initialRemaining = targetTime
+      ? Math.max(0, Math.floor((targetTime - Date.now()) / 1000))
+      : (interviewData.duration_minutes || 30) * 60;
+    setTimeLeft(initialRemaining);
+
+    if (initialRemaining <= 0) {
+      handleExpireAndComplete();
+      return;
+    }
+
+    if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+    countdownIntervalRef.current = setInterval(() => {
+      if (targetTime) {
+        const remaining = Math.max(0, Math.floor((targetTime - Date.now()) / 1000));
+        setTimeLeft(remaining);
+        if (remaining <= 0) {
+          clearInterval(countdownIntervalRef.current);
+          handleExpireAndComplete();
+        }
+      } else {
+        setTimeLeft(previous => {
+          if (previous === null || previous <= 1) {
+            clearInterval(countdownIntervalRef.current);
+            handleExpireAndComplete();
+            return 0;
+          }
+          return previous - 1;
+        });
+      }
+    }, 1000);
+  };
+
   // 2. Speak question when question changes
   useEffect(() => {
-    if (currentQuestion && ttsSupported) {
+    if (currentQuestion && interviewStarted && ttsSupported) {
       speakText(currentQuestion.question);
+    } else if (currentQuestion && interviewStarted && !ttsSupported) {
+      startRecording();
     }
-  }, [currentQuestion]);
+  }, [currentQuestion, interviewStarted, ttsSupported]);
 
-  const speakText = (text) => {
+  const speakText = (text, autoRecord = true) => {
     if (!('speechSynthesis' in window)) return;
+    const sequence = ++ttsSequenceRef.current;
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.rate = 0.95;
     utterance.pitch = 1.0;
     utterance.onstart = () => setIsSpeaking(true);
-    utterance.onend = () => setIsSpeaking(false);
-    utterance.onerror = () => setIsSpeaking(false);
+    utterance.onend = () => {
+      if (sequence !== ttsSequenceRef.current) return;
+      setIsSpeaking(false);
+      if (autoRecord && interviewStarted && currentQuestion) startRecording();
+    };
+    utterance.onerror = () => {
+      if (sequence !== ttsSequenceRef.current) return;
+      setIsSpeaking(false);
+      if (autoRecord && interviewStarted && currentQuestion) startRecording();
+    };
     window.speechSynthesis.speak(utterance);
   };
 
   const stopSpeaking = () => {
     if ('speechSynthesis' in window) {
+      ttsSequenceRef.current += 1;
       window.speechSynthesis.cancel();
       setIsSpeaking(false);
     }
   };
 
   // 3. Camera Controls
-  const toggleCamera = async () => {
-    if (cameraActive) {
-      stopCamera();
-    } else {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 480, height: 360 } });
-        videoStreamRef.current = stream;
-        setCameraActive(true);
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 480, height: 360 } });
+      videoStreamRef.current = stream;
+      setCameraActive(true);
 
-        // Start periodic frame capture for vision evaluation
-        visionIntervalRef.current = setInterval(captureAndSendFrame, 4000);
-      } catch (err) {
-        alert('Camera access was denied or unavailable. You may proceed with voice-only interview.');
-      }
+      // Start periodic frame capture for vision evaluation
+      visionIntervalRef.current = setInterval(captureAndSendFrame, 4000);
+    } catch (err) {
+      setError('Camera access was denied or unavailable. Please enable camera permissions to start the interview.');
     }
   };
+
+  useEffect(() => {
+    if (!isLoading && !sessionCompleted) {
+      startCamera();
+    }
+  }, [isLoading, sessionCompleted]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -284,7 +310,7 @@ export function InterviewSession() {
   };
 
   const captureAndSendFrame = async () => {
-    if (!videoRef.current || !cameraActive || !currentQuestion) return;
+    if (!videoRef.current || !videoStreamRef.current) return;
     try {
       const canvas = document.createElement('canvas');
       canvas.width = 320;
@@ -294,29 +320,68 @@ export function InterviewSession() {
       const b64 = canvas.toDataURL('image/jpeg', 0.6);
 
       const metrics = await interviewService.sendVisionFrame(id, {
-        questionId: currentQuestion.id,
+        questionId: currentQuestion?.id || null,
         imageBase64: b64,
       });
+      const detectedFaceCount = metrics.face_count || 0;
+      let nextExpression = expressionLabelRef.current;
+      if (detectedFaceCount === 0) {
+        nextExpression = 'Not Detected';
+        expressionHistoryRef.current = [];
+      } else if (detectedFaceCount > 1) {
+        nextExpression = 'Multiple Faces';
+        expressionHistoryRef.current = [];
+      } else if (metrics.expression_confidence >= 0.45 && metrics.dominant_emotion !== 'Unknown') {
+        expressionHistoryRef.current = [
+          ...expressionHistoryRef.current.slice(-4),
+          metrics.dominant_emotion,
+        ];
+        const counts = expressionHistoryRef.current.reduce((result, label) => {
+          result[label] = (result[label] || 0) + 1;
+          return result;
+        }, {});
+        const stableExpression = Object.entries(counts).sort((left, right) => right[1] - left[1])[0];
+        if (stableExpression && stableExpression[1] >= 2) {
+          nextExpression = stableExpression[0];
+        }
+      }
       setVisionMetrics(metrics);
+      setFaceCount(detectedFaceCount);
+      expressionLabelRef.current = nextExpression;
+      setExpressionLabel(nextExpression);
     } catch (e) {
       // Ignore background frame sync error
     }
   };
 
+  const handleStartInterview = async () => {
+    if (faceCount !== 1 || !pendingQuestion) return;
+    try {
+      const startedInterview = await interviewService.startInterview(id);
+      setInterview(startedInterview);
+      setInterviewStarted(true);
+      setCurrentQuestion(pendingQuestion);
+      setPendingQuestion(null);
+      startCountdown(startedInterview);
+    } catch (err) {
+      setError(err.message || 'Failed to start the interview.');
+    }
+  };
+
   // 4. Audio Recording
   const startRecording = async () => {
-    if (sessionCompleted || (timeLeft !== null && timeLeft <= 0) || isCompletingRef.current) {
+    if (!interviewStarted || !currentQuestion || sessionCompleted || (timeLeft !== null && timeLeft <= 0) || isCompletingRef.current || isRecording || isProcessingAnswer) {
       return;
     }
     setError(null);
     stopSpeaking();
     setTranscript('');
-    setLastFeedback(null);
     setIsFollowUpAlert(false);
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       audioChunksRef.current = [];
+      hasSpokenRef.current = false;
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
 
@@ -327,6 +392,12 @@ export function InterviewSession() {
       };
 
       mediaRecorder.onstop = async () => {
+        if (silenceCheckRef.current) clearInterval(silenceCheckRef.current);
+        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+        if (audioContextRef.current) {
+          await audioContextRef.current.close().catch(() => {});
+          audioContextRef.current = null;
+        }
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
         // Close audio track
         stream.getTracks().forEach(track => track.stop());
@@ -335,22 +406,50 @@ export function InterviewSession() {
 
       mediaRecorder.start(250);
       setIsRecording(true);
+      isRecordingRef.current = true;
       setRecordingSeconds(0);
+
+      const audioContext = new AudioContext();
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 512;
+      const source = audioContext.createMediaStreamSource(stream);
+      source.connect(analyser);
+      audioContextRef.current = audioContext;
+      const samples = new Uint8Array(analyser.fftSize);
+      silenceCheckRef.current = setInterval(() => {
+        analyser.getByteTimeDomainData(samples);
+        const volume = Math.sqrt(samples.reduce((sum, sample) => {
+          const normalized = (sample - 128) / 128;
+          return sum + normalized * normalized;
+        }, 0) / samples.length);
+
+        if (volume > 0.025) {
+          hasSpokenRef.current = true;
+          if (silenceTimerRef.current) {
+            clearTimeout(silenceTimerRef.current);
+            silenceTimerRef.current = null;
+          }
+        } else if (hasSpokenRef.current && !silenceTimerRef.current) {
+          silenceTimerRef.current = setTimeout(() => stopRecording(), ANSWER_SILENCE_WINDOW_MS);
+        }
+      }, 200);
 
       recordingTimerRef.current = setInterval(() => {
         setRecordingSeconds(prev => prev + 1);
       }, 1000);
     } catch (err) {
-      setError('Microphone access was denied or unavailable. Please enable microphone permissions or type your answer manually.');
+      setError('Microphone access was denied or unavailable. Please enable microphone permissions to answer by voice.');
     }
   };
 
   const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
+    if (mediaRecorderRef.current && isRecordingRef.current) {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
+      isRecordingRef.current = false;
       if (recordingTimerRef.current) {
         clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
       }
     }
   };
@@ -363,8 +462,11 @@ export function InterviewSession() {
     setIsProcessingAnswer(true);
     try {
       // Step 1: Transcribe
-      const transData = await interviewService.transcribeAudio(id, audioBlob, transcript);
-      const finalTranscript = transData.transcript || transcript || 'Answer provided by candidate.';
+      const transData = await interviewService.transcribeAudio(id, audioBlob);
+      const finalTranscript = (transData.transcript || '').trim();
+      if (!finalTranscript) {
+        throw new Error('The answer could not be transcribed. Please try answering again.');
+      }
       setTranscript(finalTranscript);
 
       // Step 2: Submit & Multi-modal Evaluate
@@ -374,29 +476,6 @@ export function InterviewSession() {
         handleExpireAndComplete();
       } else {
         setError(err.message || 'Failed to process spoken answer.');
-      }
-    } finally {
-      setIsProcessingAnswer(false);
-    }
-  };
-
-  const handleManualSubmit = async () => {
-    if (sessionCompleted || (timeLeft !== null && timeLeft <= 0) || isCompletingRef.current) {
-      return;
-    }
-    if (!transcript.trim()) {
-      setError('Please provide a spoken or typed answer before submitting.');
-      return;
-    }
-    setIsProcessingAnswer(true);
-    setError(null);
-    try {
-      await submitAnswerToEngine(transcript.trim(), null, 15.0);
-    } catch (err) {
-      if (err.message && err.message.toLowerCase().includes('expired')) {
-        handleExpireAndComplete();
-      } else {
-        setError(err.message || 'Failed to evaluate answer.');
       }
     } finally {
       setIsProcessingAnswer(false);
@@ -418,12 +497,6 @@ export function InterviewSession() {
         handleExpireAndComplete();
         return;
       }
-
-      setLastFeedback({
-        technical: response.technical_evaluation,
-        communication: response.communication_evaluation,
-        fluency: response.fluency_evaluation,
-      });
 
       if (response.is_completed) {
         handleExpireAndComplete();
@@ -466,25 +539,6 @@ export function InterviewSession() {
             </button>
             <Link to={`/interviews/${id}`} className="btn btn-primary">
               ← Return to Session Setup
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!currentQuestion && !sessionCompleted) {
-    return (
-      <div className="page-container py-5 text-center">
-        <div className="detail-card" style={{ maxWidth: '600px', margin: '0 auto' }}>
-          <h3>Preparing AI Interview Question...</h3>
-          <p style={{ color: '#64748b', marginTop: '0.5rem' }}>The AI interviewer is retrieving or generating your dynamic question.</p>
-          <div style={{ marginTop: '1.5rem', display: 'flex', gap: '1rem', justifyContent: 'center' }}>
-            <button onClick={() => window.location.reload()} className="btn btn-primary">
-              🔄 Refresh Session
-            </button>
-            <Link to={`/interviews/${id}`} className="btn btn-secondary">
-              ← Back to Setup
             </Link>
           </div>
         </div>
@@ -538,16 +592,10 @@ export function InterviewSession() {
             Question {currentIndex + 1} {currentQuestion?.source === 'FOLLOW_UP' ? '(Dynamic Follow-up)' : ''}
           </span>
           <span className={`timer-badge ${timeLeft !== null && timeLeft <= 60 ? 'timer-warning pulse-fast' : ''}`}>
-            ⏱️ {formatDuration(timeLeft !== null ? timeLeft : (interview?.duration_minutes || 30) * 60)}
+            ⏱️ {formatDuration(timeLeft !== null ? timeLeft : 0)}
           </span>
         </div>
         <div className="session-actions">
-          <button
-            onClick={toggleCamera}
-            className={`btn btn-sm ${cameraActive ? 'btn-danger' : 'btn-secondary'}`}
-          >
-            {cameraActive ? '📷 Turn Off Camera' : '📷 Enable Camera'}
-          </button>
           <button onClick={() => navigate('/dashboard')} className="btn btn-outline btn-sm">
             Exit Session
           </button>
@@ -581,126 +629,70 @@ export function InterviewSession() {
 
             {/* Question Text */}
             <div className="question-display-box">
-              <div className="question-tags">
-                <span className="tag-category">{currentQuestion?.category}</span>
-                <span className={`tag-difficulty ${currentQuestion?.difficulty?.toLowerCase()}`}>
-                  {currentQuestion?.difficulty}
-                </span>
-                <span className="tag-source">Source: {currentQuestion?.source}</span>
-              </div>
+              {currentQuestion ? (
+                <>
+                  <div className="question-tags">
+                    <span className="tag-category">{currentQuestion.category}</span>
+                    <span className={`tag-difficulty ${currentQuestion.difficulty?.toLowerCase()}`}>
+                      {currentQuestion.difficulty}
+                    </span>
+                    <span className="tag-source">Source: {currentQuestion.source}</span>
+                  </div>
 
-              <h2 className="active-question-text">{currentQuestion?.question}</h2>
+                  <h2 className="active-question-text">{currentQuestion.question}</h2>
 
-              {currentQuestion?.expected_focus && currentQuestion.expected_focus.length > 0 && (
-                <div className="expected-focus-box">
-                  <strong>Expected Focus:</strong> {currentQuestion.expected_focus.join(' • ')}
-                </div>
-              )}
+                  {currentQuestion.expected_focus && currentQuestion.expected_focus.length > 0 && (
+                    <div className="expected-focus-box">
+                      <strong>Expected Focus:</strong> {currentQuestion.expected_focus.join(' • ')}
+                    </div>
+                  )}
 
-              {/* TTS Controls */}
-              <div className="tts-controls-row">
-                <button
-                  onClick={() => currentQuestion?.question && speakText(currentQuestion.question)}
-                  className="btn btn-outline btn-sm"
-                  title="Replay Question Audio"
-                >
-                  🔊 Repeat Question
-                </button>
-                {isSpeaking && (
-                  <button onClick={stopSpeaking} className="btn btn-outline btn-sm">
-                    ⏹️ Stop Audio
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Answer Recording & Input Area */}
-          <div className="answer-card">
-            <div className="answer-header">
-              <h3>Your Response</h3>
-              {isRecording && (
-                <span className="recording-badge pulse">
-                  🔴 Recording ({recordingSeconds}s)
-                </span>
-              )}
-            </div>
-
-            <textarea
-              className="answer-textarea"
-              placeholder="Click 'Start Spoken Answer' to speak via microphone, or type your answer directly..."
-              value={transcript}
-              onChange={(e) => setTranscript(e.target.value)}
-              disabled={isRecording || isProcessingAnswer}
-              rows={4}
-            />
-
-            <div className="answer-controls-row">
-              {!isRecording ? (
-                <button
-                  onClick={startRecording}
-                  className="btn btn-primary btn-lg shadow-glow"
-                  disabled={isProcessingAnswer}
-                >
-                  🎙️ Start Spoken Answer
-                </button>
+                  <div className="tts-controls-row">
+                    <button
+                      onClick={() => {
+                        if (isRecordingRef.current) stopRecording();
+                        if (currentQuestion.question) speakText(currentQuestion.question);
+                      }}
+                      disabled={isRecording || isProcessingAnswer}
+                      className="btn btn-outline btn-sm"
+                      title="Replay Question Audio"
+                    >
+                      🔊 Repeat Question
+                    </button>
+                    {isSpeaking && (
+                      <button onClick={stopSpeaking} className="btn btn-outline btn-sm">
+                        ⏹️ Stop Audio
+                      </button>
+                    )}
+                  </div>
+                </>
               ) : (
-                <button
-                  onClick={stopRecording}
-                  className="btn btn-danger btn-lg pulse"
-                >
-                  ⏹️ Stop & Submit Spoken Answer
-                </button>
+                <>
+                  <h2 className="active-question-text">Ready to begin your interview</h2>
+                  <p style={{ color: '#64748b' }}>
+                    {faceCount === 0
+                      ? 'No face detected. Please position yourself in front of the camera.'
+                      : faceCount > 1
+                        ? 'Multiple faces detected. Please ensure only one person is visible.'
+                        : 'One face detected. You can start the interview.'}
+                  </p>
+                  {faceCount === 1 && (
+                    <button onClick={handleStartInterview} className="btn btn-primary btn-lg" disabled={interviewStarted}>
+                      Start Interview
+                    </button>
+                  )}
+                </>
               )}
-
-              <button
-                onClick={handleManualSubmit}
-                className="btn btn-secondary btn-lg"
-                disabled={isRecording || isProcessingAnswer || !transcript.trim()}
-              >
-                {isProcessingAnswer ? <LoadingSpinner size="small" message="Evaluating..." /> : 'Submit Text Answer ➔'}
-              </button>
             </div>
           </div>
 
-          {/* Previous Answer Real-Time Feedback Card */}
-          {lastFeedback && (
-            <div className="live-feedback-card">
-              <h3 className="feedback-title">📊 Multi-Modal Analysis on Previous Answer</h3>
-              <div className="feedback-scores-grid">
-                <div className="score-badge-box">
-                  <span className="score-label">Technical Score</span>
-                  <span className="score-val">{lastFeedback.technical.technical_score}%</span>
-                </div>
-                <div className="score-badge-box">
-                  <span className="score-label">Correctness</span>
-                  <span className="score-val">{lastFeedback.technical.correctness}%</span>
-                </div>
-                <div className="score-badge-box">
-                  <span className="score-label">Fluency Score</span>
-                  <span className="score-val">{lastFeedback.fluency.fluency_score}%</span>
-                </div>
-                <div className="score-badge-box">
-                  <span className="score-label">Pace (WPM)</span>
-                  <span className="score-val">{lastFeedback.fluency.wpm}</span>
-                </div>
-                <div className="score-badge-box">
-                  <span className="score-label">Communication</span>
-                  <span className="score-val">{lastFeedback.communication.communication_score}%</span>
-                </div>
-                <div className="score-badge-box">
-                  <span className="score-label">Filler Words</span>
-                  <span className="score-val">{lastFeedback.fluency.filler_word_count}</span>
-                </div>
-              </div>
-              <p className="feedback-text">
-                <strong>Technical Assessment:</strong> {lastFeedback.technical.feedback}
-              </p>
-              <p className="feedback-text">
-                <strong>Communication Assessment:</strong> {lastFeedback.communication.feedback}
-              </p>
+          {isRecording && (
+            <div className="recording-badge pulse" style={{ marginTop: '1rem' }}>
+              🔴 Listening for your answer ({recordingSeconds}s)
             </div>
           )}
+          {isProcessingAnswer && <LoadingSpinner size="small" message="Evaluating your answer..." />}
+
         </div>
 
         {/* Right Column: Webcam & Vision Feedback */}
@@ -713,45 +705,32 @@ export function InterviewSession() {
               ) : (
                 <div className="webcam-placeholder">
                   <span className="camera-icon">📷</span>
-                  <p>Webcam is currently disabled.</p>
-                  <button onClick={toggleCamera} className="btn btn-secondary btn-sm" style={{ marginTop: '0.5rem' }}>
-                    Enable Camera
-                  </button>
+                  <p>Waiting for camera access...</p>
                 </div>
               )}
             </div>
 
-            {cameraActive && visionMetrics && (
+            {cameraActive && (
               <div className="vision-metrics-box">
                 <h4>Observable Vision Indicators</h4>
                 <div className="metric-row">
                   <span>Face Presence:</span>
-                  <strong>{visionMetrics.face_detected ? '✅ Detected' : '❌ Not Detected'}</strong>
+                  <strong>{faceCount === 1 ? '✅ Detected' : faceCount > 1 ? '⚠️ Multiple Faces' : '❌ Not Detected'}</strong>
                 </div>
                 <div className="metric-row">
                   <span>Eye-Contact Proxy Score:</span>
-                  <strong>{visionMetrics.eye_contact_proxy_score}%</strong>
+                  <strong>{visionMetrics?.eye_contact_proxy_score || 0}%</strong>
                 </div>
                 <div className="metric-row">
                   <span>Posture Score:</span>
-                  <strong>{visionMetrics.posture_score}%</strong>
+                  <strong>{visionMetrics?.posture_score || 0}%</strong>
                 </div>
                 <div className="metric-row">
                   <span>Observable Facial Expression:</span>
-                  <strong>{visionMetrics.dominant_emotion}</strong>
+                  <strong>{expressionLabel}</strong>
                 </div>
               </div>
             )}
-          </div>
-
-          <div className="guidance-card">
-            <h3>Placement Interview Tips</h3>
-            <ul className="tips-list">
-              <li>Structure answers using <strong>STAR</strong> (Situation, Task, Action, Result).</li>
-              <li>State technical trade-offs explicitly (e.g. time vs space complexity).</li>
-              <li>Maintain steady vocal pacing around 120–150 words per minute.</li>
-              <li>Face the camera directly to ensure optimal posture evaluation.</li>
-            </ul>
           </div>
         </div>
       </div>

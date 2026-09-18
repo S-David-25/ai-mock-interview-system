@@ -151,9 +151,10 @@ class QuestionService:
             "MANDATORY INSTRUCTIONS:\n"
             "1. NEVER use canned, rigid sentence templates (e.g. 'Could you walk me through the architecture and implementation of...').\n"
             "2. NEVER use fixed question boilerplate. Decide the phrasing, angle, depth, and tone dynamically.\n"
-            "3. Craft an engaging, authentic, high-signal technical question that immediately probes the candidate's actual software projects, design decisions, architectural trade-offs, concurrency handling, database choices, or engineering challenges.\n"
-            "4. The question must sound like an experienced Senior Staff Engineer or Hiring Manager asking in real time.\n"
-            "5. Return STRICT JSON matching the schema:\n"
+            "3. Question 1 MUST be a concise self-introduction question, such as 'Tell me about yourself', while inviting the candidate to summarize their resume background. Do not ask a technical or project question first.\n"
+            "4. Keep the question direct, conversational, and under 25 words.\n"
+            "5. After the self-introduction framing, use the candidate's actual resume details rather than unrelated generic topics.\n"
+            "6. Return STRICT JSON matching the schema:\n"
             "{\n"
             '  "question": "<The fully phrased technical interview question>",\n'
             '  "category": "PROJECT" | "TECHNICAL" | "SKILL_GAP" | "SYSTEM_DESIGN" | "SCENARIO" | "BEHAVIORAL" | "CODING",\n'
@@ -178,7 +179,7 @@ class QuestionService:
             f"Session ID: {interview_id}\n"
             f"{chr(10).join(jd_context_lines)}\n"
             f"{anti_repeat_context}\n\n"
-            f"Generate a unique, compelling opening question tailored specifically to this candidate's background."
+            f"Generate Question 1 as a short self-introduction prompt that lets this candidate summarize their resume background."
         )
 
         previous_to_check = list(past_session_questions or [])
@@ -196,6 +197,9 @@ class QuestionService:
                 q_text = (result.get("question") or "").strip()
                 if not q_text or len(q_text) < 15:
                     raise ValueError(f"Gemini returned an empty or invalid question string: '{q_text}'")
+
+                if not any(term in q_text.lower() for term in ("tell me about yourself", "introduce yourself", "your background")):
+                    q_text = "Tell me about yourself and briefly highlight your resume background."
 
                 # Anti-repetition check
                 is_duplicate, duplicate_prev = QuestionService._is_too_similar(q_text, previous_to_check)
@@ -335,7 +339,7 @@ class QuestionService:
             "CRITICAL RULES:\n"
             "- NEVER use fixed sentence templates (e.g. 'Could you walk me through...', 'Specifically highlight why...').\n"
             "- NEVER repeat any question that has already been asked in this session.\n"
-            "- Craft natural, human-sounding, rigorous questions.\n"
+            "- Craft natural, human-sounding, rigorous questions under 25 words. Keep every question concise enough to answer naturally in 20-60 seconds.\n"
             "- Return STRICT JSON matching the schema:\n"
             "{\n"
             '  "is_follow_up": true | false,\n'

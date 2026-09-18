@@ -4,6 +4,7 @@ import numpy as np
 import logging
 from typing import Dict, Any, Tuple
 from app.schemas.interview import VisionFrameResponse
+from app.services.emotion_service import EmotionRecognitionService
 
 logger = logging.getLogger("vision_service")
 
@@ -32,6 +33,7 @@ class VisionService:
         if not image_base64:
             return {
                 "face_detected": False,
+                "face_count": 0,
                 "camera_facing_ratio": 0.0,
                 "eye_contact_proxy_score": 0.0,
                 "posture_score": 0.0,
@@ -51,6 +53,7 @@ class VisionService:
             if frame is None:
                 return {
                     "face_detected": False,
+                    "face_count": 0,
                     "camera_facing_ratio": 0.0,
                     "eye_contact_proxy_score": 0.0,
                     "posture_score": 0.0,
@@ -62,6 +65,7 @@ class VisionService:
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
             face_detected = False
+            face_count = 0
             eye_contact_proxy = 0.0
             posture_score = 0.0
             head_stability = 85.0
@@ -69,6 +73,7 @@ class VisionService:
 
             if _face_cascade is not None:
                 faces = _face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(60, 60))
+                face_count = len(faces)
                 if len(faces) > 0:
                     face_detected = True
                     # Primary face is the largest bounding box
@@ -96,23 +101,38 @@ class VisionService:
                     else:
                         posture_score = round(max(40.0, 60.0 - abs(face_ratio - 0.35) * 50.0), 1)
 
+                    face_crop_gray = gray[fy:fy + fh, fx:fx + fw]
+                    expression = EmotionRecognitionService.classify_facial_expression(face_crop_gray)
+                else:
+                    expression = EmotionRecognitionService.classify_facial_expression(None)
+            else:
+                expression = EmotionRecognitionService.classify_facial_expression(None)
+
             if not face_detected:
                 # No face detected in frame
                 return {
                     "face_detected": False,
+                    "face_count": face_count,
                     "camera_facing_ratio": 0.0,
                     "eye_contact_proxy_score": 0.0,
                     "posture_score": 0.0,
                     "head_stability_score": 0.0,
+                    "dominant_emotion": "Not Detected",
+                    "expression_confidence": 0.0,
+                    "emotion_probabilities": {},
                     "status": "face_not_detected"
                 }
 
             return {
                 "face_detected": True,
+                "face_count": face_count,
                 "camera_facing_ratio": camera_facing_ratio,
                 "eye_contact_proxy_score": eye_contact_proxy,
                 "posture_score": posture_score,
                 "head_stability_score": head_stability,
+                "dominant_emotion": expression["dominant_emotion"],
+                "expression_confidence": expression["expression_confidence"],
+                "emotion_probabilities": expression["emotion_probabilities"],
                 "status": "processed"
             }
 
@@ -120,9 +140,13 @@ class VisionService:
             logger.error(f"Error processing video frame: {e}")
             return {
                 "face_detected": False,
+                "face_count": 0,
                 "camera_facing_ratio": 0.0,
                 "eye_contact_proxy_score": 0.0,
                 "posture_score": 0.0,
                 "head_stability_score": 0.0,
+                "dominant_emotion": "Not Detected",
+                "expression_confidence": 0.0,
+                "emotion_probabilities": {},
                 "status": f"error: {str(e)}"
             }

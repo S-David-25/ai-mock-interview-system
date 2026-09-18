@@ -14,3 +14,4 @@ uploads/jds/*
 .env
 venv/
 env/
+backend/uploads/audio/*.webm

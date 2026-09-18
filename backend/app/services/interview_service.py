@@ -712,7 +712,11 @@ class InterviewService:
     ) -> VisionFrameResponse:
         interview = InterviewService.get_interview_by_id(db, interview_id, user_id)
         vision_result = VisionService.process_frame(image_base64)
-        emotion_result = EmotionRecognitionService.classify_facial_expression(None)
+        emotion_result = {
+            "dominant_emotion": vision_result.get("dominant_emotion", "Not Detected"),
+            "expression_confidence": vision_result.get("expression_confidence", 0.0),
+            "emotion_probabilities": vision_result.get("emotion_probabilities", {})
+        }
 
         db.execute(
             """
@@ -737,6 +741,8 @@ class InterviewService:
 
         return VisionFrameResponse(
             face_detected=vision_result["face_detected"],
+            face_count=vision_result["face_count"],
+            expression_confidence=emotion_result["expression_confidence"],
             camera_facing_ratio=vision_result["camera_facing_ratio"],
             eye_contact_proxy_score=vision_result["eye_contact_proxy_score"],
             posture_score=vision_result["posture_score"],

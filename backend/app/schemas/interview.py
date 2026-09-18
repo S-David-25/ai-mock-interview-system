@@ -205,6 +205,8 @@ class VisionFrameRequest(BaseModel):
 
 class VisionFrameResponse(BaseModel):
     face_detected: bool
+    face_count: int
+    expression_confidence: float
     camera_facing_ratio: float
     eye_contact_proxy_score: float
     posture_score: float
