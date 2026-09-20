@@ -1,5 +1,6 @@
 import json
 import logging
+from collections import Counter
 from typing import Dict, Any, List, Optional, Tuple
 from app.config import (
     TECHNICAL_WEIGHT,
@@ -71,6 +72,36 @@ class MultiModalScoringService:
 
         confidence_val = (fluency_component * 0.60) + (visual_component * 0.40)
         return round(max(10.0, min(100.0, confidence_val)), 1)
+
+    @classmethod
+    def aggregate_expression_observations(cls, behavior_analyses: List[Dict[str, Any]]) -> Tuple[float, bool]:
+        """Aggregate valid observable expression probabilities from live face frames."""
+        from app.services.emotion_service import EMOTION_CLASSES
+
+        observations = []
+        for record in behavior_analyses or []:
+            if not record.get("face_detected"):
+                continue
+            label = record.get("dominant_emotion")
+            try:
+                probabilities = json.loads(record.get("emotion_probabilities_json") or "{}")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                probabilities = {}
+            valid_probabilities = {
+                name: float(value)
+                for name, value in probabilities.items()
+                if name in EMOTION_CLASSES and float(value) > 0.0
+            }
+            if label in EMOTION_CLASSES and valid_probabilities:
+                observations.append((label, max(valid_probabilities.values())))
+
+        if not observations:
+            return 0.0, False
+
+        average_confidence = sum(confidence for _, confidence in observations) / len(observations)
+        dominant_ratio = Counter(label for label, _ in observations).most_common(1)[0][1] / len(observations)
+        score = average_confidence * (0.5 + (0.5 * dominant_ratio)) * 100.0
+        return round(max(0.0, min(100.0, score)), 1), True
 
     @classmethod
     def compute_weighted_score(
@@ -211,7 +242,7 @@ class MultiModalScoringService:
         is_expression_avail = False
         avg_eye = 75.0
         avg_posture = 75.0
-        avg_expr = 75.0
+        avg_expr = 0.0
 
         if behavior_analyses and len(behavior_analyses) > 0:
             valid_faces = [b for b in behavior_analyses if b.get("face_detected")]
@@ -220,9 +251,7 @@ class MultiModalScoringService:
                 avg_eye = sum(b.get("eye_contact_proxy_score", 75.0) for b in valid_faces) / len(valid_faces)
                 avg_posture = sum(b.get("posture_score", 75.0) for b in valid_faces) / len(valid_faces)
             
-            # Check if CNN emotion model was genuinely loaded
-            from app.services.emotion_service import EmotionRecognitionService
-            is_expression_avail = EmotionRecognitionService.is_model_available()
+            avg_expr, is_expression_avail = cls.aggregate_expression_observations(behavior_analyses)
 
         # 3. Compute Weighted Score
         overall_score, dims, weights_used, avail_sum, unavail_mods = cls.compute_weighted_score(

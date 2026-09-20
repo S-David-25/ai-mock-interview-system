@@ -114,8 +114,6 @@ class PerformanceReportService:
             strengths.append("Consistent camera-facing alignment and visual stability.")
         if posture_score >= 80.0:
             strengths.append("Upright, professional physical posture maintained throughout responses.")
-        if skill_match and skill_match.match_percentage >= 70.0:
-            strengths.append(f"High resume-to-job requirement alignment ({skill_match.match_percentage}% match).")
         if not strengths:
             strengths.append("Successfully attempted all technical and situational interview questions.")
 
@@ -130,8 +128,6 @@ class PerformanceReportService:
             weaknesses.append("Gaze wandered away from the camera during longer technical explanations.")
         if posture_score < 70.0 and score_data.dimensions["posture"].is_available:
             weaknesses.append("Observable shifts in posture and off-center alignment in frame.")
-        if skill_match and skill_match.skill_gaps:
-            weaknesses.append(f"Missing core competencies required in JD: {', '.join(skill_match.skill_gaps[:3])}.")
         if not weaknesses:
             weaknesses.append("Minor opportunities to deepen runtime complexity analysis on advanced system design topics.")
 
@@ -250,10 +246,15 @@ class PerformanceReportService:
             ans = ans_by_qid.get(qid, {})
             ana = analysis_by_qid.get(qid, {})
 
-            q_tech = float(ana.get("technical_score") or 70.0)
-            q_comm = float(ana.get("communication_score") or 70.0)
-            q_flue = float(ana.get("fluency_score") or 70.0)
-            q_fb = ana.get("technical_feedback") or "Good answer provided."
+            candidate_transcript = (ans.get("transcript_text") or "").strip()
+            has_evaluation = bool(candidate_transcript and ana)
+            q_tech = float(ana.get("technical_score") or 0.0) if has_evaluation else 0.0
+            q_comm = float(ana.get("communication_score") or 0.0) if has_evaluation else 0.0
+            q_flue = float(ana.get("fluency_score") or 0.0) if has_evaluation else 0.0
+            q_fb = "Transcription unavailable; no answer evaluation was generated." if not candidate_transcript else (
+                f"Technical evaluation: {ana.get('technical_feedback') or 'No technical feedback recorded.'} "
+                f"Communication evaluation: {ana.get('communication_feedback') or 'No communication feedback recorded.'}"
+            )
 
             question_breakdowns.append(
                 QuestionBreakdownSchema(
@@ -261,25 +262,39 @@ class PerformanceReportService:
                     question=q["question_text"],
                     category=q["question_category"],
                     difficulty=q["difficulty"],
-                    candidate_answer=ans.get("transcript_text") or "Spoken answer submitted.",
+                    candidate_answer=candidate_transcript or "Transcription unavailable",
                     technical_score=round(q_tech, 1),
                     communication_score=round(q_comm, 1),
                     fluency_score=round(q_flue, 1),
                     feedback=q_fb,
-                    strengths="Directly addressed core question concepts." if q_tech >= 75 else "Communicated technical intent.",
-                    weaknesses="Could deepen discussion of edge cases and trade-offs." if q_tech < 85 else "Minor omissions."
+                    strengths=("Technical and communication evidence was recorded for this answer." if has_evaluation else "No answer evidence was available."),
+                    weaknesses=("Review the technical and communication feedback for missing concepts or clarity improvements." if has_evaluation else "Provide a successful transcript before evaluating this question.")
                 )
             )
+
+        previous_score_row = db.fetchone(
+            """
+            SELECT s.overall_score, s.technical_score, s.communication_score, s.fluency_score
+            FROM interview_scores s
+            JOIN interviews i ON i.id = s.interview_id
+            WHERE i.user_id = ? AND s.interview_id <> ? AND i.status = 'completed'
+            ORDER BY s.created_at DESC
+            LIMIT 1
+            """,
+            (user_id, interview_id)
+        )
+        previous_scores = dict(previous_score_row) if previous_score_row else None
 
         # 9. Generate Personalized Roadmap
         roadmap_response = PersonalizedRoadmapService.generate_roadmap(
             interview_id=interview_id,
             user_id=user_id,
             score_data=score_data,
-            skill_match=skill_match,
+            skill_match=None,
             weaknesses=weaknesses,
             mistakes=[m.dict() for m in mistakes],
-            job_role=interview.job_role
+            job_role=interview.job_role,
+            previous_scores=previous_scores
         )
 
         summary_text = (
@@ -351,7 +366,7 @@ class PerformanceReportService:
                 json.dumps(strengths),
                 json.dumps(weaknesses),
                 json.dumps([m.dict() for m in mistakes]),
-                json.dumps(skill_match.skill_gaps if skill_match else []),
+                json.dumps([]),
                 json.dumps([c.dict() for c in category_ratings]),
                 json.dumps([q.dict() for q in question_breakdowns]),
                 json.dumps(resume_profile.dict() if resume_profile else {}),
@@ -391,9 +406,9 @@ class PerformanceReportService:
             strengths=strengths,
             weaknesses=weaknesses,
             frequently_observed_mistakes=mistakes,
-            skill_gaps=skill_match.skill_gaps if skill_match else [],
-            matched_skills=skill_match.matched_skills if skill_match else [],
-            match_percentage=skill_match.match_percentage if skill_match else 100.0,
+            skill_gaps=[],
+            matched_skills=[],
+            match_percentage=0.0,
             question_breakdowns=question_breakdowns,
             roadmap=roadmap_response,
             created_at=""
@@ -410,6 +425,7 @@ class PerformanceReportService:
             score_row = db.fetchone("SELECT * FROM interview_scores WHERE interview_id = ?", (interview_id,))
             int_row = db.fetchone("SELECT * FROM interviews WHERE id = ?", (interview_id,))
 
+            unavailable_modalities = json.loads(score_row["unavailable_modalities_json"] or "[]") if score_row else []
             score_data = MultiModalScoringService.compute_weighted_score(
                 technical_score=score_row["technical_score"] if score_row else 70.0,
                 communication_score=score_row["communication_score"] if score_row else 70.0,
@@ -417,7 +433,7 @@ class PerformanceReportService:
                 eye_contact_score=score_row["eye_contact_score"] if score_row else 75.0,
                 posture_score=score_row["posture_score"] if score_row else 75.0,
                 expression_score=score_row["expression_score"] if score_row else 0.0,
-                is_expression_available=False,
+                is_expression_available="expression" not in unavailable_modalities,
                 is_fluency_available=True,
                 is_vision_available=True
             )
@@ -457,9 +473,9 @@ class PerformanceReportService:
                 strengths=json.loads(rep_row["strengths_json"] or "[]"),
                 weaknesses=json.loads(rep_row["weaknesses_json"] or "[]"),
                 frequently_observed_mistakes=json.loads(rep_row["mistakes_json"] or "[]"),
-                skill_gaps=json.loads(rep_row["skill_gaps_json"] or "[]"),
+                skill_gaps=[],
                 matched_skills=[],
-                match_percentage=80.0,
+                match_percentage=0.0,
                 question_breakdowns=json.loads(rep_row["question_breakdowns_json"] or "[]"),
                 roadmap=roadmap_resp,
                 created_at=rep_row["created_at"]

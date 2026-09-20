@@ -81,8 +81,8 @@ class TranscriptionService:
                 logger.warning(f"Whisper transcription failed ({e}). Falling back.")
 
         if not transcript:
-            # If fallback text provided (e.g. from browser Web Speech API or test mock), use it
-            transcript = fallback_text.strip() if fallback_text else "Candidate provided spoken answer via audio recording."
+            # Preserve a genuine transcription failure so the caller can report it accurately.
+            transcript = fallback_text.strip() if fallback_text else ""
 
         word_count = len(transcript.split()) if transcript else 0
 

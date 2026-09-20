@@ -119,13 +119,13 @@ export function InterviewReport() {
         <div className="report-tab-content">
           {/* Executive Summary */}
           <div className="report-section-card">
-            <h2 className="section-heading">📝 Executive Summary</h2>
+            <h2 className="section-heading">📝 Overall Interview Summary</h2>
             <p className="summary-paragraph">{report.summary_text}</p>
           </div>
 
           {/* Transparent Scoring Contributions Table */}
           <div className="report-section-card">
-            <h2 className="section-heading">⚖️ Transparent Multi-Modal Scoring Matrix</h2>
+            <h2 className="section-heading">⚖️ Final Overall Score & Score Breakdown</h2>
             <p className="section-subtext">
               The Weighted Multi-Modal Interview Scoring Algorithm mathematically normalizes independent speech, conceptual, and vision dimensions into a unified score.
             </p>
@@ -176,6 +176,26 @@ export function InterviewReport() {
             )}
           </div>
 
+          <div className="report-section-card">
+            <h2 className="section-heading">👁️ Observable Vision Analysis</h2>
+            <p className="section-subtext">
+              Vision metrics describe measured camera-facing position, posture, and visible facial-expression observations only; they do not infer internal emotional state.
+            </p>
+            <div className="grid-2-col">
+              {['eye_contact', 'posture', 'expression'].map((key) => {
+                const dimension = dims[key];
+                return (
+                  <div key={key} className="vision-metric-item">
+                    <h3 className="section-heading">{key.replace('_', ' ').toUpperCase()}</h3>
+                    <p className="summary-paragraph">
+                      {dimension?.is_available ? `${dimension.raw_score}% measured from valid interview observations.` : 'Unavailable: no valid observations were collected.'}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
           {/* Strengths & Weaknesses Grid */}
           <div className="grid-2-col">
             <div className="report-section-card border-green">
@@ -218,42 +238,6 @@ export function InterviewReport() {
             </div>
           )}
 
-          {/* Resume & Job Description Match */}
-          {isCompany && (
-            <div className="report-section-card">
-              <h2 className="section-heading">📋 Resume-to-Job Alignment Analysis</h2>
-              <div className="jd-match-header">
-                <span>Match Score: <strong>{report.match_percentage}%</strong></span>
-                <div className="progress-bar-track">
-                  <div className="progress-bar-fill" style={{ width: `${report.match_percentage}%` }}></div>
-                </div>
-              </div>
-
-              <div className="grid-2-col" style={{ marginTop: '1rem' }}>
-                <div>
-                  <h4 style={{ fontSize: '0.9rem', marginBottom: '0.5rem', color: '#166534' }}>Matched Competencies:</h4>
-                  <div className="tags-cluster">
-                    {report.matched_skills && report.matched_skills.length > 0 ? (
-                      report.matched_skills.map((s, idx) => <span key={idx} className="tag-matched">✓ {s}</span>)
-                    ) : (
-                      <span className="tag-neutral">Foundational Tech Stack</span>
-                    )}
-                  </div>
-                </div>
-
-                <div>
-                  <h4 style={{ fontSize: '0.9rem', marginBottom: '0.5rem', color: '#b91c1c' }}>Identified Skill Gaps:</h4>
-                  <div className="tags-cluster">
-                    {report.skill_gaps && report.skill_gaps.length > 0 ? (
-                      report.skill_gaps.map((s, idx) => <span key={idx} className="tag-gap">⚠ {s}</span>)
-                    ) : (
-                      <span className="tag-matched">No Critical Skill Gaps</span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
       )}
 
@@ -271,11 +255,6 @@ export function InterviewReport() {
                     <span className="question-number-tag">Q{q.order_number}</span>
                     <span className="tag-category">{q.category}</span>
                     <span className={`tag-difficulty ${q.difficulty.toLowerCase()}`}>{q.difficulty}</span>
-                    <div className="question-scores-badges">
-                      <span className="badge-metric">Tech: {q.technical_score}%</span>
-                      <span className="badge-metric">Comm: {q.communication_score}%</span>
-                      <span className="badge-metric">Fluency: {q.fluency_score}%</span>
-                    </div>
                   </div>
 
                   <h3 className="review-question-text">{q.question}</h3>
@@ -288,6 +267,8 @@ export function InterviewReport() {
                   <div className="assessor-feedback-box">
                     <strong>💡 AI Evaluation & Feedback:</strong>
                     <p>{q.feedback}</p>
+                    <p><strong>What was done well:</strong> {q.strengths}</p>
+                    <p><strong>What to improve:</strong> {q.weaknesses}</p>
                   </div>
                 </div>
               ))}

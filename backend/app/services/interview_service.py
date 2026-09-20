@@ -486,6 +486,12 @@ class InterviewService:
         """
         interview = InterviewService.get_interview_by_id(db, interview_id, user_id)
 
+        if not transcript or not transcript.strip():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Transcription unavailable. No answer was evaluated or stored."
+            )
+
         # Expiry and Completion Check: Backend expiry must win
         if interview.status == "completed" or InterviewService.check_and_handle_expiry(db, interview):
             return AnswerSubmitResponse(
