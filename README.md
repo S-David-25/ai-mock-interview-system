@@ -141,15 +141,15 @@ Open the Vite URL, normally `http://localhost:5173`.
 
 Environment variables are read from `backend/.env`:
 
-| Variable | Required | Purpose |
-|---|---:|---|
-| `SECRET_KEY` | Production | JWT signing secret |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | No | Token lifetime |
-| `DATABASE_PATH` | No | SQLite path; defaults to the configured local database |
-| `GEMINI_API_KEY` | Gemini features | Dynamic question generation and structured evaluation |
-| `GEMINI_MODEL` | No | Gemini model name |
-| `WHISPER_MODEL` | No | Local Whisper model, default `base` |
-| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL` | OTP email | Verification/reset email delivery |
+| Variable                                                                      |        Required | Purpose                                                |
+| ----------------------------------------------------------------------------- | --------------: | ------------------------------------------------------ |
+| `SECRET_KEY`                                                                  |      Production | JWT signing secret                                     |
+| `ACCESS_TOKEN_EXPIRE_MINUTES`                                                 |              No | Token lifetime                                         |
+| `DATABASE_PATH`                                                               |              No | SQLite path; defaults to the configured local database |
+| `GEMINI_API_KEY`                                                              | Gemini features | Dynamic question generation and structured evaluation  |
+| `GEMINI_MODEL`                                                                |              No | Gemini model name                                      |
+| `WHISPER_MODEL`                                                               |              No | Local Whisper model, default `base`                    |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL` |       OTP email | Verification/reset email delivery                      |
 
 SQLite tables are created or upgraded additively by `backend/app/database/base.py` during FastAPI startup. No destructive migration is required for the current transcript flow.
 
