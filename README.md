@@ -12,6 +12,7 @@ An AI-powered placement preparation platform designed for engineering and techno
 ## 1. Project Overview & Capabilities
 
 The **AI Mock Interview System** prepares students for technical and placement recruitment drives:
+
 1. **Document Intelligence & Skill Matching**: Extracts structured skills, projects, and education from Resumes and Job Descriptions (PDF/DOCX) and normalizes technology aliases (`JS` $\to$ `JavaScript`, `Postgres` $\to$ `PostgreSQL`, `k8s` $\to$ `Kubernetes`, etc.) to identify skill gaps.
 2. **Personalized Question Generation**: Generates placement questions across 7 categories (`TECHNICAL`, `RESUME`, `PROJECT`, `SKILL_GAP`, `BEHAVIORAL`, `HR`, `SITUATIONAL`) tailored to candidate experience and target role.
 3. **Adaptive Dynamic Follow-ups**: Analyzes answer depth in real-time and dynamically issues follow-up questions probing architectural trade-offs.
@@ -25,12 +26,14 @@ The **AI Mock Interview System** prepares students for technical and placement r
 ## 2. Technology Stack
 
 ### Frontend
+
 - **Framework**: React 18 / Single-Page Application (SPA)
 - **Routing**: React Router DOM v6
 - **Voice & Speech**: Web Speech Synthesis API (TTS) & MediaRecorder Audio API
 - **Styling**: Modern responsive CSS3 with CSS variables, stats grid, and waveform animations
 
 ### Backend
+
 - **Framework**: FastAPI (Python 3.11)
 - **AI / LLM Service**: Google Gemini API via `from google import genai` / REST API
 - **Speech-to-Text**: Whisper STT Architecture (`transcription_service.py`)
@@ -46,6 +49,7 @@ The **AI Mock Interview System** prepares students for technical and placement r
 $$\text{Overall Score } S_{overall} = \frac{\sum_{i \in \mathcal{A}} \left( S_i \times w_i \right)}{\sum_{i \in \mathcal{A}} w_i}$$
 
 Where $\mathcal{A}$ is the set of available modalities:
+
 - **Technical Knowledge ($T$)**: Weight $0.40$ (40%)
 - **Communication ($C$)**: Weight $0.20$ (20%)
 - **Fluency ($F$)**: Weight $0.15$ (15%)
@@ -57,29 +61,29 @@ Where $\mathcal{A}$ is the set of available modalities:
 
 ## 4. REST API Reference
 
-| Endpoint | Method | Description |
-|---|---|---|
-| `/api/auth/register` | `POST` | Student registration |
-| `/api/auth/login` | `POST` | JWT authentication |
-| `/api/auth/me` | `GET` | User profile retrieval |
-| `/api/interviews` | `POST` | Create interview session |
-| `/api/interviews` | `GET` | List interviews & summary stats |
-| `/api/interviews/{id}/upload-resume` | `POST` | Upload candidate resume |
-| `/api/interviews/{id}/upload-jd` | `POST` | Upload job description |
-| `/api/interviews/{id}/process` | `POST` | Parse documents & match skills |
-| `/api/interviews/{id}/generate-questions` | `POST` | Generate personalized questions |
-| `/api/interviews/{id}/questions` | `GET` | Retrieve session questions |
-| `/api/interviews/{id}/start` | `POST` | Start interview (`in_progress`) |
-| `/api/interviews/{id}/transcribe` | `POST` | Whisper speech-to-text audio upload |
-| `/api/interviews/{id}/answer` | `POST` | Evaluate answer & dynamic follow-up |
-| `/api/interviews/{id}/vision-frame` | `POST` | Analyze webcam frame & posture |
-| `/api/interviews/{id}/complete` | `POST` | Complete interview session |
-| `/api/interviews/{id}/generate-report` | `POST` | Generate & persist complete report & roadmap |
-| `/api/interviews/{id}/report` | `GET` | Retrieve full performance report |
-| `/api/interviews/{id}/score` | `GET` | Retrieve score matrix & weights |
-| `/api/interviews/{id}/roadmap` | `GET` | Retrieve 5-phase personalized roadmap |
-| `/api/progress` | `GET` | Longitudinal progress trends & category deltas |
-| `/api/interviews/compare` | `GET` | Compare 2 sessions (`?first_id=X&second_id=Y`) |
+| Endpoint                                  | Method | Description                                    |
+| ----------------------------------------- | ------ | ---------------------------------------------- |
+| `/api/auth/register`                      | `POST` | Student registration                           |
+| `/api/auth/login`                         | `POST` | JWT authentication                             |
+| `/api/auth/me`                            | `GET`  | User profile retrieval                         |
+| `/api/interviews`                         | `POST` | Create interview session                       |
+| `/api/interviews`                         | `GET`  | List interviews & summary stats                |
+| `/api/interviews/{id}/upload-resume`      | `POST` | Upload candidate resume                        |
+| `/api/interviews/{id}/upload-jd`          | `POST` | Upload job description                         |
+| `/api/interviews/{id}/process`            | `POST` | Parse documents & match skills                 |
+| `/api/interviews/{id}/generate-questions` | `POST` | Generate personalized questions                |
+| `/api/interviews/{id}/questions`          | `GET`  | Retrieve session questions                     |
+| `/api/interviews/{id}/start`              | `POST` | Start interview (`in_progress`)                |
+| `/api/interviews/{id}/transcribe`         | `POST` | Whisper speech-to-text audio upload            |
+| `/api/interviews/{id}/answer`             | `POST` | Evaluate answer & dynamic follow-up            |
+| `/api/interviews/{id}/vision-frame`       | `POST` | Analyze webcam frame & posture                 |
+| `/api/interviews/{id}/complete`           | `POST` | Complete interview session                     |
+| `/api/interviews/{id}/generate-report`    | `POST` | Generate & persist complete report & roadmap   |
+| `/api/interviews/{id}/report`             | `GET`  | Retrieve full performance report               |
+| `/api/interviews/{id}/score`              | `GET`  | Retrieve score matrix & weights                |
+| `/api/interviews/{id}/roadmap`            | `GET`  | Retrieve 5-phase personalized roadmap          |
+| `/api/progress`                           | `GET`  | Longitudinal progress trends & category deltas |
+| `/api/interviews/compare`                 | `GET`  | Compare 2 sessions (`?first_id=X&second_id=Y`) |
 
 ---
 
