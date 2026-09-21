@@ -176,6 +176,7 @@ export function InterviewSetup() {
             {[
               { val: 1, label: '1 min', desc: '1 minute — TESTING' },
               { val: 5, label: '5 mins', desc: '5 minutes — TESTING' },
+              { val: 10, label: '10 mins', desc: '10 minutes — TESTING' },
               { val: 20, label: '20 mins', desc: '20 minutes' },
               { val: 30, label: '30 mins', desc: '30 minutes (Standard)' },
               { val: 45, label: '45 mins', desc: '45 minutes' },

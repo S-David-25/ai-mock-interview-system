@@ -198,6 +198,8 @@ class TranscriptionResponse(BaseModel):
     duration_seconds: float
     word_count: int
     audio_filename: str
+    transcription_status: str = "completed"
+    transcription_error: Optional[str] = None
 
 class VisionFrameRequest(BaseModel):
     question_id: Optional[int] = None
@@ -270,6 +272,8 @@ class RoadmapItemSchema(BaseModel):
     priority: str # High, Medium, Low
     estimated_duration: str
     measurable_target: str
+    evidence_summary: Optional[str] = None
+    learning_resources: List[Dict[str, str]] = []
 
 class RoadmapPhaseSchema(BaseModel):
     phase_number: int
@@ -304,6 +308,7 @@ class PerformanceReportResponse(BaseModel):
     matched_skills: List[str]
     match_percentage: float
     question_breakdowns: List[QuestionBreakdownSchema]
+    areas_of_improvement: List[Dict[str, Any]] = []
     roadmap: RoadmapResponse
     created_at: str
 

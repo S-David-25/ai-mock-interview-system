@@ -285,6 +285,47 @@ class PerformanceReportService:
         )
         previous_scores = dict(previous_score_row) if previous_score_row else None
 
+        skill_gaps = list(skill_match.skill_gaps) if skill_match else []
+        matched_skills = list(skill_match.matched_skills) if skill_match else []
+        areas_of_improvement: List[Dict[str, Any]] = []
+        weak_question = next((q for q in question_breakdowns if min(q.technical_score, q.communication_score, q.fluency_score) < 70), None)
+        if tech_score < 75.0 or weak_question:
+            areas_of_improvement.append({
+                "area": "Technical explanation and depth",
+                "evidence": weak_question.feedback if weak_question else f"Technical score was {tech_score:.1f}%.",
+                "why_it_matters": "Interviewers need accurate concepts, implementation detail, and trade-offs to assess technical readiness.",
+                "recommended_action": "Rebuild the lowest-scoring answer using definition, mechanism, example, and trade-off.",
+                "practice_task": "Answer the same question in 90 seconds and compare the next technical score.",
+                "target": "Reach at least 75% technical performance in the next interview.",
+            })
+        if comm_score < 75.0:
+            areas_of_improvement.append({
+                "area": "Technical communication clarity",
+                "evidence": f"Communication score was {comm_score:.1f}%.",
+                "why_it_matters": "Clear explanations make otherwise correct technical reasoning assessable.",
+                "recommended_action": "Use context, action, result structure and replace vague phrasing with precise terms.",
+                "practice_task": "Re-speak the lowest-scoring answer and review the resulting transcript.",
+                "target": "Reach at least 75% communication performance.",
+            })
+        if fluency_score < 75.0 or mistakes:
+            areas_of_improvement.append({
+                "area": "Fluency and delivery",
+                "evidence": mistakes[0].description if mistakes else f"Fluency score was {fluency_score:.1f}%.",
+                "why_it_matters": "Stable pacing and fewer fillers improve comprehension under interview pressure.",
+                "recommended_action": "Use deliberate pauses and complete sentences instead of repeated fillers.",
+                "practice_task": "Record three timed responses and compare filler count and pace.",
+                "target": "Reduce repeated delivery mistakes in the next interview.",
+            })
+        for gap in skill_gaps[:3]:
+            areas_of_improvement.append({
+                "area": f"Role skill gap: {gap}",
+                "evidence": f"Resume/JD matching identified {gap} as a role-relevant gap.",
+                "why_it_matters": f"The {gap} requirement affects readiness for the target role.",
+                "recommended_action": f"Study {gap} fundamentals and production trade-offs, then explain one implementation.",
+                "practice_task": f"Build or verbally explain a small {gap} example in three minutes.",
+                "target": f"Explain {gap} accurately in a role-level answer.",
+            })
+
         # 9. Generate Personalized Roadmap
         roadmap_response = PersonalizedRoadmapService.generate_roadmap(
             interview_id=interview_id,
@@ -294,7 +335,8 @@ class PerformanceReportService:
             weaknesses=weaknesses,
             mistakes=[m.dict() for m in mistakes],
             job_role=interview.job_role,
-            previous_scores=previous_scores
+            previous_scores=previous_scores,
+            question_evidence=[q.dict() for q in question_breakdowns]
         )
 
         summary_text = (
@@ -353,9 +395,9 @@ class PerformanceReportService:
             INSERT OR REPLACE INTO interview_reports (
                 interview_id, user_id, overall_score, readiness_level, summary_text,
                 strengths_json, weaknesses_json, mistakes_json, skill_gaps_json,
-                category_ratings_json, question_breakdowns_json, resume_review_json,
+                category_ratings_json, question_breakdowns_json, areas_of_improvement_json, resume_review_json,
                 jd_match_json, roadmap_json, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'utc'))
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'utc'))
             """,
             (
                 interview_id,
@@ -369,6 +411,7 @@ class PerformanceReportService:
                 json.dumps([]),
                 json.dumps([c.dict() for c in category_ratings]),
                 json.dumps([q.dict() for q in question_breakdowns]),
+                json.dumps(areas_of_improvement),
                 json.dumps(resume_profile.dict() if resume_profile else {}),
                 json.dumps(jd_profile.dict() if jd_profile else {}),
                 json.dumps([p.dict() for p in roadmap_response.phases])
@@ -406,10 +449,11 @@ class PerformanceReportService:
             strengths=strengths,
             weaknesses=weaknesses,
             frequently_observed_mistakes=mistakes,
-            skill_gaps=[],
-            matched_skills=[],
-            match_percentage=0.0,
+            skill_gaps=skill_gaps,
+            matched_skills=matched_skills,
+            match_percentage=float(skill_match.match_percentage) if skill_match else 0.0,
             question_breakdowns=question_breakdowns,
+            areas_of_improvement=areas_of_improvement,
             roadmap=roadmap_response,
             created_at=""
         )
@@ -473,6 +517,7 @@ class PerformanceReportService:
                 strengths=json.loads(rep_row["strengths_json"] or "[]"),
                 weaknesses=json.loads(rep_row["weaknesses_json"] or "[]"),
                 frequently_observed_mistakes=json.loads(rep_row["mistakes_json"] or "[]"),
+                areas_of_improvement=json.loads(rep_row["areas_of_improvement_json"] or "[]") if "areas_of_improvement_json" in rep_row.keys() else [],
                 skill_gaps=[],
                 matched_skills=[],
                 match_percentage=0.0,

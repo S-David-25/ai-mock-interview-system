@@ -19,6 +19,24 @@ class PersonalizedRoadmapService:
     connecting identified candidate weaknesses, skill gaps, and interview metrics.
     """
 
+    RESOURCE_CATALOG = {
+        "python": {"title": "Python Tutorial", "provider": "Python", "url": "https://docs.python.org/3/tutorial/", "type": "documentation"},
+        "sql": {"title": "SQL Joins", "provider": "GeeksforGeeks", "url": "https://www.geeksforgeeks.org/sql/sql-join-set-1-inner-left-right-and-full-joins/", "type": "tutorial"},
+        "react": {"title": "React Learn", "provider": "React", "url": "https://react.dev/learn", "type": "documentation"},
+        "rest": {"title": "REST API Tutorial", "provider": "MDN", "url": "https://developer.mozilla.org/en-US/docs/Glossary/REST", "type": "documentation"},
+        "kafka": {"title": "Apache Kafka Documentation", "provider": "Apache Kafka", "url": "https://kafka.apache.org/documentation/", "type": "documentation"},
+        "spring": {"title": "Spring Framework Reference", "provider": "Spring", "url": "https://docs.spring.io/spring-framework/reference/", "type": "documentation"},
+        "docker": {"title": "Docker Get Started", "provider": "Docker", "url": "https://docs.docker.com/get-started/", "type": "documentation"},
+        "communication": {"title": "Google Technical Writing", "provider": "Google", "url": "https://developers.google.com/tech-writing", "type": "tutorial"},
+        "fluency": {"title": "Public Speaking Resources", "provider": "Toastmasters", "url": "https://www.toastmasters.org/resources/public-speaking-tips", "type": "tutorial"},
+    }
+
+    @classmethod
+    def _resource_pack(cls, area: str, gaps: Optional[List[str]] = None) -> List[Dict[str, str]]:
+        text = f"{area} {' '.join(gaps or [])}".lower()
+        resources = [resource for key, resource in cls.RESOURCE_CATALOG.items() if key in text]
+        return resources[:2]
+
     @classmethod
     def generate_roadmap(
         cls,
@@ -29,7 +47,8 @@ class PersonalizedRoadmapService:
         weaknesses: Optional[List[str]] = None,
         mistakes: Optional[List[Dict[str, Any]]] = None,
         job_role: Optional[str] = None,
-        previous_scores: Optional[Dict[str, float]] = None
+        previous_scores: Optional[Dict[str, float]] = None,
+        question_evidence: Optional[List[Dict[str, Any]]] = None
     ) -> RoadmapResponse:
         phases: List[RoadmapPhaseSchema] = []
 
@@ -42,6 +61,8 @@ class PersonalizedRoadmapService:
         tech_raw = technical.raw_score if technical else 0.0
         comm_raw = communication.raw_score if communication else 0.0
         fluency_raw = fluency.raw_score if fluency else 0.0
+        question_evidence = question_evidence or []
+        weak_question = next((q for q in question_evidence if min(q.get("technical_score", 100), q.get("communication_score", 100), q.get("fluency_score", 100)) < 70), None)
 
         # -------------------------------------------------------------
         # PHASE 1: Immediate Improvement (Days 1 - 3)
@@ -86,7 +107,7 @@ class PersonalizedRoadmapService:
         phases.append(
             RoadmapPhaseSchema(
                 phase_number=1,
-                phase_title="Phase 1 — Immediate Improvement",
+                phase_title=f"Phase 1 — {'Technical Answer Repair' if tech_raw < 75 or weak_question else 'Response Delivery Calibration' if mistakes else 'Evidence Review'}",
                 focus_objective="Eliminate conversational friction, calibrate pacing, and structure technical answers cleanly.",
                 items=phase1_items
             )
@@ -140,7 +161,7 @@ class PersonalizedRoadmapService:
         phases.append(
             RoadmapPhaseSchema(
                 phase_number=2,
-                phase_title="Phase 2 — Technical Improvement",
+                phase_title=f"Phase 2 — {skill_match.skill_gaps[0] + ' Readiness' if skill_match and skill_match.skill_gaps else 'Technical Improvement'}",
                 focus_objective=f"Bridge skill gaps required for {role_title} and master architectural trade-offs.",
                 items=phase2_items
             )
@@ -184,7 +205,7 @@ class PersonalizedRoadmapService:
         phases.append(
             RoadmapPhaseSchema(
                 phase_number=3,
-                phase_title="Phase 3 — Communication Improvement",
+                phase_title=f"Phase 3 — {'Communication Clarity' if comm_raw < 75 else 'Fluency and Delivery' if fluency_raw < 75 else 'Communication Maintenance'}",
                 focus_objective="Elevate technical communication, professional vocabulary, and concise articulation.",
                 items=phase3_items
             )
@@ -209,7 +230,7 @@ class PersonalizedRoadmapService:
         phases.append(
             RoadmapPhaseSchema(
                 phase_number=4,
-                phase_title="Phase 4 — Interview Practice",
+                phase_title=f"Phase 4 — {role_title} Simulation",
                 focus_objective="Simulate full-length placement rounds under adaptive questioning conditions.",
                 items=phase4_items
             )
@@ -240,11 +261,17 @@ class PersonalizedRoadmapService:
         phases.append(
             RoadmapPhaseSchema(
                 phase_number=5,
-                phase_title="Phase 5 — Reassessment",
+                phase_title=f"Phase 5 — {'Recovery Benchmark' if score_data.overall_score < 70 else 'Placement Reassessment'}",
                 focus_objective="Validate score improvements and certify placement drive readiness.",
                 items=phase5_items
             )
         )
+
+        gaps = skill_match.skill_gaps if skill_match else []
+        for phase in phases:
+            for item in phase.items:
+                item.evidence_summary = item.problem
+                item.learning_resources = cls._resource_pack(item.area, gaps)
 
         return RoadmapResponse(
             interview_id=interview_id,

@@ -1993,6 +1993,20 @@ body {
   font-weight: 600;
 }
 
+.roadmap-evidence {
+  color: var(--text-secondary);
+  font-size: 0.825rem;
+}
+
+.resource-list {
+  margin: 0.35rem 0 0 1.25rem;
+}
+
+.resource-list a {
+  color: var(--primary);
+  text-decoration: underline;
+}
+
 .report-bottom-actions {
   display: flex;
   justify-content: center;

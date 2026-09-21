@@ -462,7 +462,7 @@ export function InterviewSession() {
     setIsProcessingAnswer(true);
     try {
       // Step 1: Transcribe
-      const transData = await interviewService.transcribeAudio(id, audioBlob);
+      const transData = await interviewService.transcribeAudio(id, audioBlob, '', currentQuestion?.question || '');
       const finalTranscript = (transData.transcript || '').trim();
       if (!finalTranscript) {
         throw new Error('The answer could not be transcribed. Please try answering again.');
