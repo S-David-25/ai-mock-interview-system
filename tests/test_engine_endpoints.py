@@ -1,5 +1,6 @@
 import unittest
 import io
+from unittest.mock import patch
 from fpdf import FPDF
 from starlette.testclient import TestClient
 from app.main import app
@@ -114,12 +115,16 @@ class TestInterviewEngineEndpoints(unittest.TestCase):
 
         # 7. Test Audio Transcription Endpoint
         sample_audio = io.BytesIO(b"fake wav audio header and speech data")
-        res_trans = self.client.post(
-            f"/api/interviews/{int_id}/transcribe",
-            files={"file": ("recording.wav", sample_audio, "audio/wav")},
-            data={"fallback_text": "I utilized FastAPI for the backend architecture with asynchronous endpoints."},
-            headers=self.headers1
-        )
+        class FakeWhisper:
+            def transcribe(self, path, **kwargs):
+                return {"text": "I utilized FastAPI for the backend architecture with asynchronous endpoints."}
+
+        with patch("app.services.transcription_service._whisper_available", True), patch("app.services.transcription_service._whisper_model", FakeWhisper()):
+            res_trans = self.client.post(
+                f"/api/interviews/{int_id}/transcribe",
+                files={"file": ("recording.wav", sample_audio, "audio/wav")},
+                headers=self.headers1
+            )
         self.assertEqual(res_trans.status_code, 200)
         self.assertIn("FastAPI", res_trans.json()["transcript"])
 

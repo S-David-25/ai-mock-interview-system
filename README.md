@@ -87,20 +87,103 @@ Where $\mathcal{A}$ is the set of available modalities:
 
 ---
 
-## 5. Verification & Test Execution
+## 5. Architecture and Interview Data Flow
 
-Execute the full automated test suite (45 passing tests):
+The React/Vite frontend authenticates with the FastAPI backend, creates an interview, uploads the resume and optional JD, and opens the protected session route. The existing session component speaks each AI question, starts the existing MediaRecorder flow after TTS, detects silence, and creates the completed WebM Blob. Camera and audio lifecycle code are intentionally kept separate.
 
-```bash
-PYTHONPATH=backend python3 -m unittest discover -s tests -p "test_*.py" -v
+The completed Blob is uploaded to Whisper through `POST /api/interviews/{id}/transcribe`. The backend saves the audio, transcribes it with English decoding and a technical-vocabulary prompt containing the active question context, and returns the actual transcript. The frontend then submits that transcript to `/api/interviews/{id}/answer`; the existing evaluator stores the answer, evaluates technical/communication/fluency dimensions, and sends the same transcript to adaptive follow-up generation.
+
+The report reads the stored question, transcript, answer analysis, behavioural observations, score dimensions, resume/JD match, and history. The roadmap keeps five phases but changes titles and item resources according to the observed weaknesses and role gaps.
+
+## 6. Setup
+
+Prerequisites:
+
+- Python 3.11+ and a project virtual environment
+- Node.js and npm
+- FFmpeg on `PATH` for WebM/audio decoding
+- Browser microphone and camera permissions
+- Gemini API key for dynamic questions and AI evaluation
+- Whisper model weights downloaded on first use
+
+Backend setup from the repository root:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r backend/requirements.txt
+Copy-Item backend/.env.example backend/.env
 ```
 
----
+Set `GEMINI_API_KEY` in `backend/.env`. `WHISPER_MODEL=base` is the default. Verify dependencies:
 
-## 6. Known Limitations & Blocked Dependencies
+```powershell
+ffmpeg -version
+.\.venv\Scripts\python.exe -c "import whisper; print('Whisper import: OK')"
+```
 
-- **Whisper STT Local Model Weights**: In the offline sandbox environment without outbound internet or CUDA drivers, audio speech ingestion operates with audio metadata extraction and browser Web Speech transcript synchronization. Marked: `BLOCKED — OpenAI Whisper package / GPU runtime not loaded in offline sandbox`.
-- **FER2013 CNN Model Weights**: If `fer2013_cnn.h5` weights file is not present, the scoring algorithm applies missing-modality normalization without assigning fake scores. Marked: `BLOCKED — FER2013 model weights file not loaded in environment`.
+Run the backend with the project interpreter:
+
+```powershell
+cd backend
+..\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+Run the frontend in a second terminal:
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+Open the Vite URL, normally `http://localhost:5173`.
+
+Environment variables are read from `backend/.env`:
+
+| Variable | Required | Purpose |
+|---|---:|---|
+| `SECRET_KEY` | Production | JWT signing secret |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | No | Token lifetime |
+| `DATABASE_PATH` | No | SQLite path; defaults to the configured local database |
+| `GEMINI_API_KEY` | Gemini features | Dynamic question generation and structured evaluation |
+| `GEMINI_MODEL` | No | Gemini model name |
+| `WHISPER_MODEL` | No | Local Whisper model, default `base` |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL` | OTP email | Verification/reset email delivery |
+
+SQLite tables are created or upgraded additively by `backend/app/database/base.py` during FastAPI startup. No destructive migration is required for the current transcript flow.
+
+## 7. Performance, Roadmap, and Resources
+
+Scoring preserves the weighted multi-modal algorithm and missing-modality normalization. The report builds question-level breakdowns only from the stored candidate transcript and answer analysis; failed transcription does not receive fabricated feedback.
+
+Roadmap content is selected from technical, communication, fluency, behavioural, question-level, mistake, skill-gap, and historical evidence. Each item includes a diagnostic problem, action, practice task, measurable target, evidence summary, and resources selected from a maintained allow-list. Resources are topic-specific official documentation or established educational pages; the UI renders them as safe external links.
+
+## 8. Testing
+
+Use the project interpreter and backend import path:
+
+```powershell
+$env:PYTHONPATH='backend'
+$env:TESTING='1'
+..\.venv\Scripts\python.exe -m pytest -q
+```
+
+Build the frontend:
+
+```powershell
+cd frontend
+npm run build
+```
+
+## 9. Troubleshooting and Limitations
+
+- If Whisper cannot be imported, start Uvicorn with `..\.venv\Scripts\python.exe -m uvicorn ...`; a system-Python reload worker may not see the project package.
+- If WebM decoding fails, confirm `ffmpeg -version` works from the same shell that starts the backend.
+- Technical transcription uses Whisper `initial_prompt`, English decoding, deterministic temperature, and the active question context. It does not blindly replace words such as “palindrome” with “polynomial”.
+- Gemini HTTP 429 responses indicate provider quota/rate limits and can prevent dynamic questions or follow-ups.
+- Facial-expression scoring depends on optional model weights; unavailable modalities remain excluded through existing normalization.
+- The current test suite contains live Gemini-dependent tests, so quota/network availability can affect those tests independently of local transcription and roadmap logic.
 
 ---
 

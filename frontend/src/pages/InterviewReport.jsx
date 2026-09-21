@@ -217,6 +217,23 @@ export function InterviewReport() {
             </div>
           </div>
 
+          {report.areas_of_improvement?.length > 0 && (
+            <div className="report-section-card">
+              <h2 className="section-heading">🧭 Evidence-Based Areas of Improvement</h2>
+              <div className="mistakes-grid">
+                {report.areas_of_improvement.map((area) => (
+                  <div key={area.area} className="mistake-card">
+                    <div className="mistake-title">{area.area}</div>
+                    <p className="mistake-desc"><strong>Evidence:</strong> {area.evidence}</p>
+                    <p className="mistake-desc"><strong>Why it matters:</strong> {area.why_it_matters}</p>
+                    <p className="mistake-remediation"><strong>Next action:</strong> {area.recommended_action}</p>
+                    <p className="mistake-remediation"><strong>Target:</strong> {area.target}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Frequently Observed Mistakes */}
           {report.frequently_observed_mistakes && report.frequently_observed_mistakes.length > 0 && (
             <div className="report-section-card">
@@ -310,6 +327,18 @@ export function InterviewReport() {
                         <div className="measurable-target-box">
                           <strong>🎯 Target Milestone:</strong> {item.measurable_target}
                         </div>
+                        {item.evidence_summary && <p className="roadmap-evidence"><strong>Evidence:</strong> {item.evidence_summary}</p>}
+                        {item.learning_resources?.length > 0 && (
+                          <ul className="resource-list">
+                            {item.learning_resources.map((resource) => (
+                              <li key={resource.url}>
+                                <a href={resource.url} target="_blank" rel="noopener noreferrer">
+                                  {resource.title} ({resource.provider})
+                                </a>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
                       </div>
                     ))}
                   </div>

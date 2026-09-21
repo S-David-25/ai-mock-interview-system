@@ -191,6 +191,7 @@ def init_db():
         skill_gaps_json TEXT,
         category_ratings_json TEXT,
         question_breakdowns_json TEXT,
+        areas_of_improvement_json TEXT,
         resume_review_json TEXT,
         jd_match_json TEXT,
         roadmap_json TEXT,
@@ -199,6 +200,7 @@ def init_db():
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
     """)
+    ensure_column_exists(conn, "interview_reports", "areas_of_improvement_json", "TEXT")
 
     # 9. Roadmap table (Master Prompt 3 5-Phase Personalized Milestones)
     cursor.execute("""

@@ -34,6 +34,7 @@ ALLOWED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".webm", ".m4a", ".ogg"}
 # AI Service Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
+WHISPER_MODEL = os.getenv("WHISPER_MODEL", "base")
 
 # Interview Logic Parameters
 MAX_TOTAL_QUESTIONS = int(os.getenv("MAX_TOTAL_QUESTIONS", "15"))

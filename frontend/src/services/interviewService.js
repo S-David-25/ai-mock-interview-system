@@ -58,11 +58,14 @@ export const interviewService = {
     return await api.post(`/api/interviews/${interviewId}/start`);
   },
 
-  async transcribeAudio(interviewId, audioBlob, fallbackText = '') {
+  async transcribeAudio(interviewId, audioBlob, fallbackText = '', questionContext = '') {
     const formData = new FormData();
     formData.append('file', audioBlob, 'recording.webm');
     if (fallbackText) {
       formData.append('fallback_text', fallbackText);
+    }
+    if (questionContext) {
+      formData.append('question_context', questionContext);
     }
     return await api.post(`/api/interviews/${interviewId}/transcribe`, formData);
   },
