@@ -263,14 +263,14 @@ export function InterviewDetail() {
           <div className="detail-card">
             <h2 className="detail-card-title">📋 Job Description Validation</h2>
             {!interview?.is_jd_uploaded && !jdValidation && (
-              <p style={{ color: '#64748b' }}>No Job Description provided yet. Paste the JD or upload a PDF/DOCX in the setup page.</p>
+              <p style={{ color: 'var(--copy-muted)' }}>No Job Description provided yet. Paste the JD or upload a PDF/DOCX in the setup page.</p>
             )}
 
             {jdValidation && !jdValidation.is_valid && (
               <div className="validation-error-box">
                 <strong>❌ Invalid Job Description</strong>
                 <p style={{ marginTop: '0.5rem' }}>{renderListOrString(jdValidation.reasons, '; ')}</p>
-                <p style={{ fontSize: '0.95rem', color: '#64748b' }}>
+                <p style={{ fontSize: '0.95rem', color: 'var(--copy-muted)' }}>
                   Document type: {jdValidation.document_type || 'unknown'} • Confidence: {jdValidation.confidence ?? 'N/A'}
                 </p>
                 <div style={{ marginTop: '0.75rem' }}>
@@ -298,7 +298,7 @@ export function InterviewDetail() {
             {jdValidation && jdValidation.is_valid && (
               <div className="validation-success-box">
                 <strong>✅ Job Description Validated</strong>
-                <p style={{ marginTop: '0.5rem', color: '#475569' }}>
+                <p style={{ marginTop: '0.5rem', color: 'var(--copy-body)' }}>
                   Document Type: Job Description • Confidence: {jdValidation.confidence ?? 'High'}
                 </p>
               </div>
@@ -307,7 +307,7 @@ export function InterviewDetail() {
             {!jdValidation && interview?.is_jd_uploaded && (
               <div className="validation-success-box">
                 <strong>📄 Job Description Uploaded</strong>
-                <p style={{ marginTop: '0.5rem', color: '#475569' }}>
+                <p style={{ marginTop: '0.5rem', color: 'var(--copy-body)' }}>
                   {interview?.jd_original_name || 'Job Description file'} ready for analysis.
                 </p>
               </div>
@@ -318,17 +318,17 @@ export function InterviewDetail() {
         {/* AI Voice Interview Coach & Launch Card */}
         <div className="detail-card">
           <h2 className="detail-card-title">🤖 AI Interview Coach</h2>
-          <p style={{ color: '#64748b', fontSize: '0.95rem', lineHeight: '1.5' }}>
+          <p style={{ color: 'var(--copy-muted)', fontSize: '0.95rem', lineHeight: '1.5' }}>
             This session uses dynamic Gemini question generation. The AI interviewer will ask personalized questions based on your resume and JD, analyze your speech correctness and fluency, and ask adaptive follow-ups in real time.
           </p>
 
           <div className="action-box" style={{ marginTop: '1.5rem' }}>
             {interview?.status === 'completed' ? (
               <div className="completed-session-box" style={{ textAlign: 'center', padding: '1rem 0' }}>
-                <div style={{ color: '#16a34a', fontWeight: 600, fontSize: '1.1rem', marginBottom: '0.75rem' }}>
+                <div style={{ color: 'var(--status-success-text)', fontWeight: 600, fontSize: '1.1rem', marginBottom: '0.75rem' }}>
                   ✅ This interview session is completed.
                 </div>
-                <p style={{ color: '#64748b', fontSize: '0.95rem', marginBottom: '1.25rem' }}>
+                <p style={{ color: 'var(--copy-muted)', fontSize: '0.95rem', marginBottom: '1.25rem' }}>
                   All multi-modal evaluations are finalized.
                 </p>
                 <Link to={`/interviews/${id}/report`} className="btn btn-primary btn-block btn-lg shadow-glow">
@@ -339,9 +339,9 @@ export function InterviewDetail() {
               <>
                 {/* Document processing state banner */}
                 {processingActive ? (
-                  <div style={{ marginBottom: '1rem', background: '#f8fafc', padding: '1rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                  <div style={{ marginBottom: '1rem', background: 'var(--surface-wash)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border-soft)' }}>
                     <LoadingSpinner size="small" message={processingMessage || 'Analyzing documents...'} />
-                    <div style={{ marginTop: '0.5rem', color: '#334155', fontSize: '0.9rem', fontWeight: 500 }}>
+                    <div style={{ marginTop: '0.5rem', color: 'var(--copy-strong)', fontSize: '0.9rem', fontWeight: 500 }}>
                       {processingMessage}
                     </div>
                   </div>
@@ -349,7 +349,7 @@ export function InterviewDetail() {
                   <div className="validation-error-box">
                     <strong>❌ Invalid Resume</strong>
                     <p style={{ marginTop: '0.5rem' }}>{renderListOrString(resumeValidation.reasons, '; ')}</p>
-                    <p style={{ fontSize: '0.95rem', color: '#64748b' }}>
+                    <p style={{ fontSize: '0.95rem', color: 'var(--copy-muted)' }}>
                       Document type: {resumeValidation.document_type || 'unknown'} • Confidence: {resumeValidation.confidence ?? 'N/A'}
                     </p>
                     <div style={{ marginTop: '0.75rem' }}>
@@ -375,7 +375,7 @@ export function InterviewDetail() {
                 ) : parsedProfile ? (
                   <div className="validation-success-box" style={{ marginBottom: '1rem' }}>
                     <strong>✅ Resume Parsed Successfully</strong>
-                    <p style={{ marginTop: '0.5rem', color: '#475569' }}>
+                    <p style={{ marginTop: '0.5rem', color: 'var(--copy-body)' }}>
                       Candidate profile and skills extracted. Ready to start interview.
                     </p>
                   </div>
@@ -431,44 +431,44 @@ export function InterviewDetail() {
             ) : atsAnalysis ? (
               <>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap' }}>
-                  <div style={{ fontSize: '2.5rem', fontWeight: 800, color: atsAnalysis.ats_score >= 70 ? '#16a34a' : atsAnalysis.ats_score >= 50 ? '#d97706' : '#dc2626' }}>
+                  <div style={{ fontSize: '2.5rem', fontWeight: 800, color: atsAnalysis.ats_score >= 70 ? 'var(--status-success-text)' : atsAnalysis.ats_score >= 50 ? 'var(--status-warning-score)' : 'var(--status-danger-text)' }}>
                     {atsAnalysis.ats_score ?? 0} / 100
                   </div>
                   <div>
                     <div style={{ fontWeight: 700, fontSize: '1.2rem' }}>{atsAnalysis.score_label || 'Match Score'}</div>
-                    <div style={{ color: '#64748b', fontSize: '0.95rem' }}>Resume ➔ Job Description Compatibility</div>
+                    <div style={{ color: 'var(--copy-muted)', fontSize: '0.95rem' }}>Resume ➔ Job Description Compatibility</div>
                   </div>
                 </div>
 
                 <div style={{ marginTop: '1.25rem' }}>
                   <strong>Matched Skills:</strong>
-                  <div style={{ marginTop: '0.5rem', color: '#16a34a', fontWeight: 500 }}>
+                  <div style={{ marginTop: '0.5rem', color: 'var(--status-success-text)', fontWeight: 500 }}>
                     {renderListOrString(atsAnalysis.matched_skills) || '—'}
                   </div>
                 </div>
 
                 <div style={{ marginTop: '0.75rem' }}>
                   <strong>Missing Skills:</strong>
-                  <div style={{ marginTop: '0.5rem', color: '#b45309', fontWeight: 500 }}>
+                  <div style={{ marginTop: '0.5rem', color: 'var(--status-warning-text)', fontWeight: 500 }}>
                     {renderListOrString(atsAnalysis.missing_skills) || '—'}
                   </div>
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem', marginTop: '1.25rem' }}>
-                  <div style={{ background: '#f8fafc', padding: '0.75rem', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
-                    <div style={{ fontSize: '0.85rem', color: '#64748b' }}>Keyword Coverage</div>
+                  <div style={{ background: 'var(--surface-wash)', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border-soft)' }}>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--copy-muted)' }}>Keyword Coverage</div>
                     <div style={{ fontSize: '1.25rem', fontWeight: 700, marginTop: '0.25rem' }}>{atsAnalysis.keyword_coverage ?? 0}%</div>
                   </div>
-                  <div style={{ background: '#f8fafc', padding: '0.75rem', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
-                    <div style={{ fontSize: '0.85rem', color: '#64748b' }}>Experience Match</div>
+                  <div style={{ background: 'var(--surface-wash)', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border-soft)' }}>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--copy-muted)' }}>Experience Match</div>
                     <div style={{ fontSize: '1.25rem', fontWeight: 700, marginTop: '0.25rem' }}>{atsAnalysis.experience_match ?? 0}%</div>
                   </div>
-                  <div style={{ background: '#f8fafc', padding: '0.75rem', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
-                    <div style={{ fontSize: '0.85rem', color: '#64748b' }}>Education Match</div>
+                  <div style={{ background: 'var(--surface-wash)', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border-soft)' }}>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--copy-muted)' }}>Education Match</div>
                     <div style={{ fontSize: '1.25rem', fontWeight: 700, marginTop: '0.25rem' }}>{atsAnalysis.education_match ?? 0}%</div>
                   </div>
-                  <div style={{ background: '#f8fafc', padding: '0.75rem', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
-                    <div style={{ fontSize: '0.85rem', color: '#64748b' }}>Role Alignment</div>
+                  <div style={{ background: 'var(--surface-wash)', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border-soft)' }}>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--copy-muted)' }}>Role Alignment</div>
                     <div style={{ fontSize: '1.25rem', fontWeight: 700, marginTop: '0.25rem' }}>{atsAnalysis.role_alignment ?? 0}%</div>
                   </div>
                 </div>
@@ -478,7 +478,7 @@ export function InterviewDetail() {
                     <strong>ATS Recommendations:</strong>
                     <ul style={{ marginTop: '0.5rem', paddingLeft: '1.25rem' }}>
                       {atsAnalysis.recommendations.map((r, idx) => (
-                        <li key={idx} style={{ marginTop: '0.25rem', color: '#334155' }}>
+                        <li key={idx} style={{ marginTop: '0.25rem', color: 'var(--copy-strong)' }}>
                           {typeof r === 'string' ? r : JSON.stringify(r)}
                         </li>
                       ))}
@@ -487,7 +487,7 @@ export function InterviewDetail() {
                 )}
               </>
             ) : (
-              <p style={{ color: '#64748b', marginTop: '0.5rem' }}>
+              <p style={{ color: 'var(--copy-muted)', marginTop: '0.5rem' }}>
                 {interview?.is_jd_uploaded
                   ? 'ATS calculation will appear once documents are processed.'
                   : 'Upload a Job Description to calculate ATS match.'}
@@ -563,7 +563,7 @@ export function InterviewDetail() {
                         {p.name && <div style={{ fontWeight: 600 }}>{p.name}</div>}
                         {p.description && <div style={{ marginTop: '0.25rem' }}>{p.description}</div>}
                         {p.technologies && (
-                          <div style={{ marginTop: '0.25rem', fontStyle: 'italic', color: '#475569' }}>
+                          <div style={{ marginTop: '0.25rem', fontStyle: 'italic', color: 'var(--copy-body)' }}>
                             Technologies: {renderListOrString(p.technologies)}
                           </div>
                         )}
@@ -588,7 +588,7 @@ export function InterviewDetail() {
                         <div style={{ fontWeight: 600 }}>
                           {e.company || ''} {e.role ? `— ${e.role}` : ''}
                         </div>
-                        {e.duration && <div style={{ fontSize: '0.95rem', color: '#64748b' }}>{e.duration}</div>}
+                        {e.duration && <div style={{ fontSize: '0.95rem', color: 'var(--copy-muted)' }}>{e.duration}</div>}
                         {e.responsibilities && (
                           <div style={{ marginTop: '0.25rem' }}>
                             {renderListOrString(e.responsibilities, ' • ')}

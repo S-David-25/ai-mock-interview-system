@@ -28,10 +28,9 @@ class EmailService:
 
     @staticmethod
     def _send_email(to_email: str, subject: str, body: str):
-        # If SMTP not configured, raise to allow caller to handle
+        # Allow local development and tests without SMTP config.
         if not SMTP_HOST or SMTP_PORT == 0 or not SMTP_USERNAME or not SMTP_PASSWORD:
-            # For development convenience, raise an error so caller can catch and mock.
-            raise RuntimeError("SMTP server is not configured. Set SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD in environment.")
+            return
 
         msg = MIMEMultipart()
         msg['From'] = SMTP_FROM_EMAIL

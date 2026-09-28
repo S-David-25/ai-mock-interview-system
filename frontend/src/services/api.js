@@ -10,11 +10,27 @@ class ApiClient {
     this.baseUrl = baseUrl;
   }
 
-  getToken() {
-    return localStorage.getItem('ai_mock_token');
+  getToken(endpoint = '') {
+    if (endpoint.startsWith('/api/admin/')) {
+      return localStorage.getItem('ai_mock_admin_token') || localStorage.getItem('ai_mock_token');
+    }
+    return localStorage.getItem('ai_mock_token') || localStorage.getItem('ai_mock_admin_token');
   }
 
-  setToken(token) {
+  setToken(token, role = 'candidate') {
+    if (role === 'admin') {
+      localStorage.removeItem('ai_mock_token');
+      localStorage.removeItem('ai_mock_user');
+      if (token) {
+        localStorage.setItem('ai_mock_admin_token', token);
+      } else {
+        localStorage.removeItem('ai_mock_admin_token');
+      }
+      return;
+    }
+
+    localStorage.removeItem('ai_mock_admin_token');
+    localStorage.removeItem('ai_mock_admin_user');
     if (token) {
       localStorage.setItem('ai_mock_token', token);
     } else {
@@ -22,13 +38,13 @@ class ApiClient {
     }
   }
 
-  removeToken() {
-    localStorage.removeItem('ai_mock_token');
+  removeToken(role = 'candidate') {
+    localStorage.removeItem(role === 'admin' ? 'ai_mock_admin_token' : 'ai_mock_token');
   }
 
   async request(endpoint, options = {}) {
     const url = `${this.baseUrl}${endpoint}`;
-    const token = this.getToken();
+    const token = this.getToken(endpoint);
 
     const headers = {
       ...options.headers,
@@ -61,8 +77,9 @@ class ApiClient {
       if (!response.ok) {
         if (response.status === 401) {
           // Token expired or invalid
-          this.removeToken();
-          window.dispatchEvent(new CustomEvent('auth:unauthorized'));
+          const role = endpoint.startsWith('/api/admin/') ? 'admin' : 'candidate';
+          this.removeToken(role);
+          window.dispatchEvent(new CustomEvent('auth:unauthorized', { detail: { role } }));
         }
 
         let errorMessage = 'An unexpected error occurred.';

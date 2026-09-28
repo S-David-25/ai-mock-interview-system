@@ -17,7 +17,7 @@ class AuthService:
         return User.from_row(row)
 
     @staticmethod
-    def register_user(db: DatabaseSession, data: UserRegister) -> Tuple[User, str]:
+    def register_user(db: DatabaseSession, data: UserRegister, role: str = "candidate") -> Tuple[User, str]:
         import os
         existing = AuthService.get_user_by_email(db, data.email)
         if existing:
@@ -28,7 +28,8 @@ class AuthService:
 
         # Ensure the email was verified through OTP for registration purpose unless in test mode
         from app.services.otp_service import OTPService
-        verified = OTPService.is_email_verified(db, data.email, purpose='register')
+        purpose = "admin_register" if role == "admin" else "register"
+        verified = OTPService.is_email_verified(db, data.email, purpose=purpose)
         if not verified and not os.environ.get("TESTING"):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -37,8 +38,8 @@ class AuthService:
 
         hashed_pw = hash_password(data.password)
         cursor = db.execute(
-            "INSERT INTO users (name, email, password_hash, created_at) VALUES (?, ?, ?, datetime('now', 'utc'))",
-            (data.name, data.email.lower(), hashed_pw)
+            "INSERT INTO users (name, email, password_hash, role, created_at) VALUES (?, ?, ?, ?, datetime('now', 'utc'))",
+            (data.name, data.email.lower(), hashed_pw, role)
         )
         db.commit()
         user_id = cursor.lastrowid
@@ -47,11 +48,11 @@ class AuthService:
         if not user:
             raise HTTPException(status_code=500, detail="Failed to create user record.")
 
-        token = create_access_token({"sub": str(user.id), "email": user.email, "name": user.name})
+        token = create_access_token({"sub": str(user.id), "email": user.email, "name": user.name, "role": user.role})
         return user, token
 
     @staticmethod
-    def authenticate_user(db: DatabaseSession, email: str, password: str) -> Tuple[User, str]:
+    def authenticate_user(db: DatabaseSession, email: str, password: str, required_role: Optional[str] = None) -> Tuple[User, str]:
         user = AuthService.get_user_by_email(db, email)
         if not user:
             raise HTTPException(
@@ -65,18 +66,25 @@ class AuthService:
                 detail="Invalid email or password."
             )
 
-        token = create_access_token({"sub": str(user.id), "email": user.email, "name": user.name})
+        if required_role and user.role != required_role:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied. Invalid account role."
+            )
+
+        token = create_access_token({"sub": str(user.id), "email": user.email, "name": user.name, "role": user.role})
         return user, token
 
     @staticmethod
-    def reset_password(db: DatabaseSession, email: str, new_password: str) -> None:
+    def reset_password(db: DatabaseSession, email: str, new_password: str, role: str = "candidate") -> None:
         """Reset password for an existing user identified by email."""
         user = AuthService.get_user_by_email(db, email)
         if not user:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+        if role and user.role != role:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid account role.")
 
         hashed_pw = hash_password(new_password)
         db.execute("UPDATE users SET password_hash = ? WHERE email = ?", (hashed_pw, email.lower()))
         db.commit()
-        # Optionally return nothing; caller will confirm success
 

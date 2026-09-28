@@ -531,7 +531,7 @@ export function InterviewSession() {
     return (
       <div className="page-container py-5">
         <div className="detail-card" style={{ maxWidth: '600px', margin: '0 auto', textAlign: 'center' }}>
-          <h2 style={{ color: '#dc2626', marginBottom: '1rem' }}>⚠️ Unable to Load Interview Session</h2>
+          <h2 style={{ color: 'var(--status-danger-text)', marginBottom: '1rem' }}>⚠️ Unable to Load Interview Session</h2>
           <Alert type="error" message={error} />
           <div style={{ marginTop: '1.5rem', display: 'flex', gap: '1rem', justifyContent: 'center' }}>
             <button onClick={() => window.location.reload()} className="btn btn-secondary">
@@ -669,7 +669,7 @@ export function InterviewSession() {
               ) : (
                 <>
                   <h2 className="active-question-text">Ready to begin your interview</h2>
-                  <p style={{ color: '#64748b' }}>
+                  <p style={{ color: 'var(--copy-muted)' }}>
                     {faceCount === 0
                       ? 'No face detected. Please position yourself in front of the camera.'
                       : faceCount > 1

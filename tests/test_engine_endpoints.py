@@ -177,5 +177,27 @@ class TestInterviewEngineEndpoints(unittest.TestCase):
         }, headers=self.headers2)
         self.assertEqual(res_unauth_ans.status_code, 404)
 
+    def test_03_transcription_falls_back_to_submitted_text_when_whisper_is_empty(self):
+        res_create = self.client.post("/api/interviews", json={"interview_type": "general"}, headers=self.headers1)
+        interview_id = res_create.json()["id"]
+        fallback_text = "I designed the service using FastAPI and deployed the API with Docker on AWS."
+
+        class EmptyWhisper:
+            def transcribe(self, path, **kwargs):
+                return {"text": ""}
+
+        sample_audio = io.BytesIO(b"fake wav audio header and speech data")
+        with patch("app.services.transcription_service._whisper_available", True), patch("app.services.transcription_service._whisper_model", EmptyWhisper()):
+            resp = self.client.post(
+                f"/api/interviews/{interview_id}/transcribe",
+                data={"fallback_text": fallback_text, "question_context": "Explain your architecture."},
+                files={"file": ("recording.wav", sample_audio, "audio/wav")},
+                headers=self.headers1,
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["transcript"], fallback_text)
+        self.assertEqual(resp.json()["transcription_status"], "completed")
+
 if __name__ == "__main__":
     unittest.main()

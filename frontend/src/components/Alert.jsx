@@ -5,27 +5,27 @@ export function Alert({ type = 'error', message, onDismiss }) {
 
   const styles = {
     error: {
-      bg: '#fef2f2',
-      border: '#fca5a5',
-      color: '#991b1b',
+      bg: 'var(--alert-error-bg)',
+      border: 'var(--alert-error-border)',
+      color: 'var(--alert-error-text)',
       icon: '⚠️'
     },
     success: {
-      bg: '#f0fdf4',
-      border: '#86efac',
-      color: '#166534',
+      bg: 'var(--alert-success-bg)',
+      border: 'var(--alert-success-border)',
+      color: 'var(--alert-success-text)',
       icon: '✅'
     },
     info: {
-      bg: '#eff6ff',
-      border: '#93c5fd',
-      color: '#1e40af',
+      bg: 'var(--alert-info-bg)',
+      border: 'var(--alert-info-border)',
+      color: 'var(--alert-info-text)',
       icon: 'ℹ️'
     },
     warning: {
-      bg: '#fffbeb',
-      border: '#fde68a',
-      color: '#92400e',
+      bg: 'var(--alert-warning-bg)',
+      border: 'var(--alert-warning-border)',
+      color: 'var(--alert-warning-text)',
       icon: '⚡'
     }
   };

@@ -8,6 +8,7 @@ from fastapi.exceptions import RequestValidationError
 from app.config import CORS_ORIGINS
 from app.database.base import init_db
 from app.routes.auth import router as auth_router
+from app.routes.admin import router as admin_router
 from app.routes.interview import router as interview_router
 
 logging.basicConfig(level=logging.INFO)
@@ -68,6 +69,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 # Include Routers
 app.include_router(auth_router)
+app.include_router(admin_router)
 app.include_router(interview_router)
 
 @app.get("/health")

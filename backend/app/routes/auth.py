@@ -51,6 +51,15 @@ def get_current_user(
     return user
 
 
+def get_current_candidate_user(current_user: User = Depends(get_current_user)) -> User:
+    if current_user.role != "candidate":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied. Invalid account role."
+        )
+    return current_user
+
+
 @router.post("/register/send-otp")
 def send_registration_otp(payload: dict, db: DatabaseSession = Depends(get_db)):
     """Initiate registration by sending an OTP to the provided email + name.
@@ -218,7 +227,7 @@ def forgot_password_reset(payload: dict, db: DatabaseSession = Depends(get_db)):
 @router.post("/login", response_model=TokenResponse)
 def login(data: UserLogin, db: DatabaseSession = Depends(get_db)):
     """Authenticate student and return JWT access token."""
-    user, token = AuthService.authenticate_user(db, data.email, data.password)
+    user, token = AuthService.authenticate_user(db, data.email, data.password, required_role="candidate")
     return TokenResponse(
         access_token=token,
         token_type="bearer",
@@ -226,23 +235,25 @@ def login(data: UserLogin, db: DatabaseSession = Depends(get_db)):
             id=user.id,
             name=user.name,
             email=user.email,
+            role=user.role,
             created_at=user.created_at
         )
     )
 
 
 @router.get("/me", response_model=UserResponse)
-def get_me(current_user: User = Depends(get_current_user)):
+def get_me(current_user: User = Depends(get_current_candidate_user)):
     """Retrieve details for current authenticated student."""
     return UserResponse(
         id=current_user.id,
         name=current_user.name,
         email=current_user.email,
+        role=current_user.role,
         created_at=current_user.created_at
     )
 
 
 @router.post("/logout")
-def logout(current_user: User = Depends(get_current_user)):
+def logout(current_user: User = Depends(get_current_candidate_user)):
     """Logout current user session."""
     return {"status": "success", "message": "Successfully logged out."}
