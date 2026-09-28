@@ -12,6 +12,13 @@ import { InterviewDetail } from './pages/InterviewDetail';
 import { InterviewSession } from './pages/InterviewSession';
 import { InterviewReport } from './pages/InterviewReport';
 import { InterviewCompare } from './pages/InterviewCompare';
+import { AdminLogin } from './pages/AdminLogin';
+import { AdminRegister } from './pages/AdminRegister';
+import { AdminForgotPassword } from './pages/AdminForgotPassword';
+import { AdminDashboard } from './pages/AdminDashboard';
+import { AdminCandidateDetail } from './pages/AdminCandidateDetail';
+import { AdminInterviewDetail } from './pages/AdminInterviewDetail';
+import { AdminProtectedRoute } from './components/AdminProtectedRoute';
 
 export function App() {
   return (
@@ -25,6 +32,9 @@ export function App() {
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
               <Route path="/forgot-password" element={<ForgotPassword />} />
+              <Route path="/admin/login" element={<AdminLogin />} />
+              <Route path="/admin/register" element={<AdminRegister />} />
+              <Route path="/admin/forgot-password" element={<AdminForgotPassword />} />
 
               {/* Protected Routes */}
               <Route
@@ -73,6 +83,30 @@ export function App() {
                   <ProtectedRoute>
                     <InterviewReport />
                   </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/dashboard"
+                element={
+                  <AdminProtectedRoute>
+                    <AdminDashboard />
+                  </AdminProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/candidates/:candidateId"
+                element={
+                  <AdminProtectedRoute>
+                    <AdminCandidateDetail />
+                  </AdminProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/interviews/:interviewId"
+                element={
+                  <AdminProtectedRoute>
+                    <AdminInterviewDetail />
+                  </AdminProtectedRoute>
                 }
               />
 

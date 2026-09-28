@@ -41,6 +41,7 @@ class UserResponse(BaseModel):
     id: int
     name: str
     email: str
+    role: str = "candidate"
     created_at: str
 
 class TokenResponse(BaseModel):

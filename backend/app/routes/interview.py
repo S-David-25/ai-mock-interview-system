@@ -2,7 +2,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Query, status
 from app.database.session import DatabaseSession, get_db
 from app.models.user import User
-from app.routes.auth import get_current_user
+from app.routes.auth import get_current_candidate_user
 from app.schemas.interview import (
     InterviewCreate,
     InterviewResponse,
@@ -38,7 +38,7 @@ router = APIRouter(prefix="/api", tags=["Interviews & Analytics"])
 @router.post("/interviews", response_model=InterviewResponse, status_code=status.HTTP_201_CREATED)
 def create_interview(
     data: InterviewCreate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_candidate_user),
     db: DatabaseSession = Depends(get_db)
 ):
     """Create a new mock interview session."""
@@ -47,7 +47,7 @@ def create_interview(
 
 @router.get("/interviews", response_model=InterviewListResponse)
 def list_interviews(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_candidate_user),
     db: DatabaseSession = Depends(get_db)
 ):
     """List all interviews and summary metrics for the authenticated user."""
@@ -64,7 +64,7 @@ def list_interviews(
 def compare_interviews(
     first_id: int = Query(..., description="ID of the first/baseline interview"),
     second_id: int = Query(..., description="ID of the second/recent interview"),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_candidate_user),
     db: DatabaseSession = Depends(get_db)
 ):
     """
@@ -79,7 +79,7 @@ def compare_interviews(
 
 @router.get("/progress", response_model=ProgressResponse)
 def get_user_progress(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_candidate_user),
     db: DatabaseSession = Depends(get_db)
 ):
     """
@@ -92,7 +92,7 @@ def get_user_progress(
 @router.get("/interviews/{interview_id}", response_model=InterviewResponse)
 def get_interview(
     interview_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_candidate_user),
     db: DatabaseSession = Depends(get_db)
 ):
     """Get details of a specific interview session."""
@@ -103,7 +103,7 @@ def get_interview(
 async def upload_resume(
     interview_id: int,
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_candidate_user),
     db: DatabaseSession = Depends(get_db)
 ):
     """Upload and parse Resume (PDF/DOCX) for the interview."""
@@ -122,7 +122,7 @@ async def upload_resume(
 async def upload_jd(
     interview_id: int,
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_candidate_user),
     db: DatabaseSession = Depends(get_db)
 ):
     """Upload and parse Job Description (PDF/DOCX) for Company-specific interview."""
@@ -142,7 +142,7 @@ async def upload_jd(
 async def submit_jd_text(
     interview_id: int,
     jd_text: str = Form(...),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_candidate_user),
     db: DatabaseSession = Depends(get_db)
 ):
     """Submit JD as plain text (pasted into textarea)."""
@@ -161,7 +161,7 @@ async def submit_jd_text(
 @router.get("/interviews/{interview_id}/status", response_model=InterviewStatusResponse)
 def get_interview_status(
     interview_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_candidate_user),
     db: DatabaseSession = Depends(get_db)
 ):
     """Get current readiness and completion status for an interview session."""
@@ -221,7 +221,7 @@ def get_interview_status(
 @router.post("/interviews/{interview_id}/process", response_model=DocumentProcessResponse)
 async def process_interview_documents(
     interview_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_candidate_user),
     db: DatabaseSession = Depends(get_db)
 ):
     """Extracts structured Resume and JD profiles and performs skill matching."""
@@ -251,7 +251,7 @@ async def process_interview_documents(
 @router.post("/interviews/{interview_id}/generate-questions", response_model=QuestionListResponse)
 async def generate_questions(
     interview_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_candidate_user),
     db: DatabaseSession = Depends(get_db)
 ):
     """Generates personalized interview questions based on candidate profile, target role, and JD."""
@@ -265,7 +265,7 @@ async def generate_questions(
 @router.get("/interviews/{interview_id}/questions", response_model=QuestionListResponse)
 def get_questions(
     interview_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_candidate_user),
     db: DatabaseSession = Depends(get_db)
 ):
     """Retrieves all generated questions for this interview session."""
@@ -279,7 +279,7 @@ def get_questions(
 @router.post("/interviews/{interview_id}/start", response_model=InterviewResponse)
 def start_interview(
     interview_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_candidate_user),
     db: DatabaseSession = Depends(get_db)
 ):
     """Transitions interview session status to 'in_progress'."""
@@ -292,7 +292,7 @@ async def transcribe_audio(
     file: UploadFile = File(...),
     fallback_text: Optional[str] = Form(None),
     question_context: Optional[str] = Form(None),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_candidate_user),
     db: DatabaseSession = Depends(get_db)
 ):
     """Uploads audio recording and transcribes it into text via Whisper."""
@@ -303,7 +303,7 @@ async def transcribe_audio(
 async def submit_answer(
     interview_id: int,
     data: AnswerSubmitRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_candidate_user),
     db: DatabaseSession = Depends(get_db)
 ):
     """
@@ -324,7 +324,7 @@ async def submit_answer(
 def analyze_vision_frame(
     interview_id: int,
     data: VisionFrameRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_candidate_user),
     db: DatabaseSession = Depends(get_db)
 ):
     """
@@ -342,7 +342,7 @@ def analyze_vision_frame(
 @router.post("/interviews/{interview_id}/complete", response_model=InterviewResponse)
 def complete_interview(
     interview_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_candidate_user),
     db: DatabaseSession = Depends(get_db)
 ):
     """Marks the interview session as completed."""
@@ -354,7 +354,7 @@ def complete_interview(
 @router.post("/interviews/{interview_id}/generate-report", response_model=PerformanceReportResponse)
 def generate_interview_report(
     interview_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_candidate_user),
     db: DatabaseSession = Depends(get_db)
 ):
     """
@@ -370,7 +370,7 @@ def generate_interview_report(
 @router.get("/interviews/{interview_id}/report", response_model=PerformanceReportResponse)
 def get_interview_report(
     interview_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_candidate_user),
     db: DatabaseSession = Depends(get_db)
 ):
     """
@@ -385,7 +385,7 @@ def get_interview_report(
 @router.get("/interviews/{interview_id}/score", response_model=InterviewScoreResponse)
 def get_interview_score(
     interview_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_candidate_user),
     db: DatabaseSession = Depends(get_db)
 ):
     """
@@ -397,7 +397,7 @@ def get_interview_score(
 @router.get("/interviews/{interview_id}/roadmap", response_model=RoadmapResponse)
 def get_interview_roadmap(
     interview_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_candidate_user),
     db: DatabaseSession = Depends(get_db)
 ):
     """

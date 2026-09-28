@@ -24,9 +24,11 @@ def init_db():
         name TEXT NOT NULL,
         email TEXT UNIQUE NOT NULL,
         password_hash TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'candidate' CHECK(role IN ('candidate', 'admin')),
         created_at TEXT NOT NULL DEFAULT (datetime('now', 'utc'))
     );
     """)
+    ensure_column_exists(conn, "users", "role", "TEXT NOT NULL DEFAULT 'candidate'")
 
     # 2. Interview table
     cursor.execute("""

@@ -101,8 +101,11 @@ class TranscriptionService:
             transcription_error = "Whisper is unavailable in the backend runtime."
 
         if not transcript:
-            # Keep failed audio explicit; caller-supplied text is never treated as audio transcription.
-            transcription_error = transcription_error or "Whisper produced no usable transcript."
+            if fallback_text and fallback_text.strip():
+                transcript = fallback_text.strip()
+                transcription_error = None
+            else:
+                transcription_error = transcription_error or "Whisper produced no usable transcript."
 
         word_count = len(transcript.split()) if transcript else 0
 

@@ -102,6 +102,7 @@ Prerequisites:
 - Python 3.11+ and a project virtual environment
 - Node.js and npm
 - FFmpeg on `PATH` for WebM/audio decoding
+- Tesseract OCR on `PATH` only when processing scanned/image-based PDFs
 - Browser microphone and camera permissions
 - Gemini API key for dynamic questions and AI evaluation
 - Whisper model weights downloaded on first use
@@ -152,6 +153,8 @@ Environment variables are read from `backend/.env`:
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL` |       OTP email | Verification/reset email delivery                      |
 
 SQLite tables are created or upgraded additively by `backend/app/database/base.py` during FastAPI startup. No destructive migration is required for the current transcript flow.
+
+Document extraction is native-first: text PDFs use `pypdf`, DOCX files use `python-docx`, and scanned PDFs fall back to `pypdfium2` page rendering plus `pytesseract`. OCR is not invoked for usable text-based documents. Install Tesseract separately and verify it with `tesseract --version`; normal PDF/DOCX processing does not require OCR to be available.
 
 ## 7. Performance, Roadmap, and Resources
 

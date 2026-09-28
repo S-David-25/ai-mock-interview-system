@@ -110,6 +110,9 @@ export function Login() {
               Create Student Account
             </Link>
           </p>
+          <p style={{ marginTop: '0.65rem' }}>
+            <Link to="/admin/login" className="auth-link">Admin Login</Link>
+          </p>
         </div>
       </div>
     </div>

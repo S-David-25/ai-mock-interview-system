@@ -2,9 +2,8 @@ import re
 import uuid
 from pathlib import Path
 from typing import Tuple
-import pypdf
-import docx
 from app.config import ALLOWED_EXTENSIONS, MAX_FILE_SIZE_BYTES
+from app.services.document_extraction_service import DocumentExtractionService
 
 def sanitize_filename(filename: str) -> str:
     """Removes path separators and invalid characters from filename."""
@@ -44,30 +43,5 @@ def extract_text_from_file(file_path: Path) -> Tuple[str, int]:
     Extracts plain text from PDF or DOCX file.
     Returns: (extracted_text, word_count)
     """
-    ext = file_path.suffix.lower()
-    text = ""
-
-    if ext == ".pdf":
-        try:
-            reader = pypdf.PdfReader(str(file_path))
-            pages_text = []
-            for page in reader.pages:
-                t = page.extract_text()
-                if t:
-                    pages_text.append(t)
-            text = "\n".join(pages_text).strip()
-        except Exception as e:
-            raise ValueError(f"Failed to extract text from PDF: {str(e)}")
-
-    elif ext == ".docx":
-        try:
-            doc = docx.Document(str(file_path))
-            paras = [p.text for p in doc.paragraphs if p.text.strip()]
-            text = "\n".join(paras).strip()
-        except Exception as e:
-            raise ValueError(f"Failed to extract text from DOCX: {str(e)}")
-    else:
-        raise ValueError(f"Unsupported file extension: {ext}")
-
-    word_count = len(text.split()) if text else 0
-    return text, word_count
+    extracted = DocumentExtractionService.extract_document(file_path)
+    return extracted.text, len(extracted.text.split())

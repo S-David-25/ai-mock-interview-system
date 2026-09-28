@@ -245,7 +245,7 @@ export function InterviewSetup() {
                 value={jdText}
                 onChange={(e) => setJdText(e.target.value)}
                 disabled={isSubmitting}
-                style={{ width: '100%', padding: '0.75rem', borderRadius: '6px', border: '1px solid #e2e8f0', marginBottom: '0.75rem' }}
+                style={{ width: '100%', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border-soft)', marginBottom: '0.75rem' }}
               />
               <div style={{ marginTop: '0.5rem' }}>
                 <FileUploader

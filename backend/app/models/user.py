@@ -7,6 +7,7 @@ class User:
     name: str = ""
     email: str = ""
     password_hash: str = ""
+    role: str = "candidate"
     created_at: Optional[str] = None
 
     @classmethod
@@ -18,6 +19,7 @@ class User:
             name=row.get("name"),
             email=row.get("email"),
             password_hash=row.get("password_hash"),
+            role=(row.get("role") or "candidate"),
             created_at=row.get("created_at"),
         )
 
@@ -26,6 +28,7 @@ class User:
             "id": self.id,
             "name": self.name,
             "email": self.email,
+            "role": self.role or "candidate",
             "created_at": self.created_at,
         }
         if include_sensitive:

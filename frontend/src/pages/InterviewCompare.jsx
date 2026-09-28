@@ -147,7 +147,7 @@ export function InterviewCompare() {
                   {comparison.improved_areas.map((a, idx) => <li key={idx}>✓ {a}</li>)}
                 </ul>
               ) : (
-                <p style={{ fontSize: '0.85rem', color: '#64748b' }}>No dimension registered positive delta.</p>
+                <p style={{ fontSize: '0.85rem', color: 'var(--copy-muted)' }}>No dimension registered positive delta.</p>
               )}
             </div>
 
@@ -158,7 +158,7 @@ export function InterviewCompare() {
                   {comparison.declined_areas.map((a, idx) => <li key={idx}>⚠ {a}</li>)}
                 </ul>
               ) : (
-                <p style={{ fontSize: '0.85rem', color: '#166534' }}>✓ No dimension showed negative score delta!</p>
+                <p style={{ fontSize: '0.85rem', color: 'var(--status-success-strong)' }}>✓ No dimension showed negative score delta!</p>
               )}
             </div>
 
@@ -169,7 +169,7 @@ export function InterviewCompare() {
                   {comparison.unchanged_areas.map((a, idx) => <li key={idx}>• {a}</li>)}
                 </ul>
               ) : (
-                <p style={{ fontSize: '0.85rem', color: '#64748b' }}>All dimensions showed active delta.</p>
+                <p style={{ fontSize: '0.85rem', color: 'var(--copy-muted)' }}>All dimensions showed active delta.</p>
               )}
             </div>
           </div>
@@ -195,7 +195,7 @@ export function InterviewCompare() {
                       <td>{dim.first_score}%</td>
                       <td>{dim.second_score}%</td>
                       <td>
-                        <strong style={{ color: dim.delta > 0 ? '#16a34a' : (dim.delta < 0 ? '#dc2626' : '#64748b') }}>
+                        <strong style={{ color: dim.delta > 0 ? 'var(--status-success-text)' : (dim.delta < 0 ? 'var(--status-danger-text)' : 'var(--copy-muted)') }}>
                           {dim.delta > 0 ? `+${dim.delta}%` : `${dim.delta}%`}
                         </strong>
                       </td>

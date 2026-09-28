@@ -54,15 +54,15 @@ export function formatFileSize(bytes) {
 export function getStatusInfo(status) {
   switch (status) {
     case 'ready':
-      return { label: 'Ready to Start', bg: '#dcfce7', color: '#15803d', border: '#86efac' };
+      return { label: 'Ready to Start', bg: 'var(--status-ready-bg)', color: 'var(--status-ready-text)', border: 'var(--status-ready-border)' };
     case 'in_progress':
-      return { label: 'In Progress', bg: '#fef3c7', color: '#b45309', border: '#fde68a' };
+      return { label: 'In Progress', bg: 'var(--status-progress-bg)', color: 'var(--status-progress-text)', border: 'var(--status-progress-border)' };
     case 'completed':
-      return { label: 'Completed', bg: '#e0e7ff', color: '#4338ca', border: '#c7d2fe' };
+      return { label: 'Completed', bg: 'var(--status-complete-bg)', color: 'var(--status-complete-text)', border: 'var(--status-complete-border)' };
     case 'failed':
-      return { label: 'Failed', bg: '#fee2e2', color: '#b91c1c', border: '#fca5a5' };
+      return { label: 'Failed', bg: 'var(--status-failed-bg)', color: 'var(--status-failed-text)', border: 'var(--status-failed-border)' };
     case 'setup':
     default:
-      return { label: 'Setup Incomplete', bg: '#f1f5f9', color: '#475569', border: '#cbd5e1' };
+      return { label: 'Setup Incomplete', bg: 'var(--status-setup-bg)', color: 'var(--status-setup-text)', border: 'var(--status-setup-border)' };
   }
 }

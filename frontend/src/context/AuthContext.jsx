@@ -31,7 +31,8 @@ export function AuthProvider({ children }) {
     loadUser();
 
     // Listen to unauthorized global events
-    const handleUnauthorized = () => {
+    const handleUnauthorized = (event) => {
+      if (event.detail?.role === 'admin') return;
       setUser(null);
       setToken(null);
     };

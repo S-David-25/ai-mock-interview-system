@@ -8,3 +8,5 @@ httpx>=0.24.0
 cryptography>=41.0.0
 opencv-python>=4.8.0,<5.0.0
 openai-whisper>=20231117
+pypdfium2>=4.30.0
+pytesseract>=0.3.13
