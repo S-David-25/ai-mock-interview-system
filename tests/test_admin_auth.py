@@ -137,6 +137,20 @@ class TestAdminAuthEndpoints(unittest.TestCase):
         }])
         self.assertEqual(data["interview_activity"], [{"date": "2026-05-14", "completed_interviews": 1}])
         self.assertEqual(data["category_performance"][0], {"dimension": "Technical", "score": 66.0})
+        self.assertEqual(data["average_improvement"], None)
+        self.assertEqual(candidate_summary["completed_interviews"], 1)
+
+        candidate_detail = self.client.get(
+            f"/api/admin/candidates/{candidate.json()['user']['id']}",
+            headers={"Authorization": f"Bearer {admin.json()['access_token']}"},
+        )
+        self.assertEqual(candidate_detail.status_code, 200)
+        analytics_interviews = candidate_detail.json()["performance"]["analytics_interviews"]
+        self.assertEqual(len(analytics_interviews), 1)
+        self.assertEqual(analytics_interviews[0]["interview_number"], 1)
+        self.assertEqual(analytics_interviews[0]["overall_score"], 65.1)
+        self.assertEqual(analytics_interviews[0]["technical_score"], 66.0)
+        self.assertEqual(analytics_interviews[0]["question_scores"], [])
 
         candidates = self.client.get("/api/admin/candidates", headers={"Authorization": f"Bearer {admin.json()['access_token']}"})
         candidate_row = next(item for item in candidates.json()["items"] if item["id"] == candidate.json()["user"]["id"])

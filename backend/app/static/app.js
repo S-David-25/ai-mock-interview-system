@@ -412,14 +412,19 @@ async function startRecording() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     audioChunks = [];
-    mediaRecorder = new MediaRecorder(stream);
+    const supportedMimeType = typeof MediaRecorder.isTypeSupported === 'function'
+      ? ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus']
+        .find((mimeType) => MediaRecorder.isTypeSupported(mimeType))
+      : undefined;
+    mediaRecorder = new MediaRecorder(stream, supportedMimeType ? { mimeType: supportedMimeType } : undefined);
 
     mediaRecorder.ondataavailable = (e) => {
       if (e.data.size > 0) audioChunks.push(e.data);
     };
 
     mediaRecorder.onstop = async () => {
-      const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+      const recordedMimeType = mediaRecorder.mimeType || audioChunks.find((chunk) => chunk.type)?.type || 'audio/webm';
+      const audioBlob = new Blob(audioChunks, { type: recordedMimeType });
       stream.getTracks().forEach(t => t.stop());
       await handleAudioRecorded(audioBlob);
     };
@@ -455,15 +460,19 @@ async function handleAudioRecorded(audioBlob) {
   try {
     const intId = state.activeInterview.id;
     const formData = new FormData();
-    formData.append('file', audioBlob, 'recording.webm');
-    if (state.transcript) formData.append('fallback_text', state.transcript);
-
+    const extension = audioBlob.type.includes('ogg') ? 'ogg'
+      : audioBlob.type.includes('mp4') ? 'm4a'
+        : audioBlob.type.includes('wav') ? 'wav' : 'webm';
+    formData.append('file', audioBlob, `recording.${extension}`);
     const transData = await apiRequest(`/api/interviews/${intId}/transcribe`, {
       method: 'POST',
       body: formData
     });
 
-    const finalTranscript = transData.transcript || state.transcript || 'Spoken answer submitted.';
+    const finalTranscript = (transData.transcript || '').trim();
+    if (transData.transcription_status !== 'completed' || !finalTranscript) {
+      throw new Error('The answer could not be transcribed. Please try answering again.');
+    }
     state.transcript = finalTranscript;
     await submitAnswerPayload(finalTranscript, transData.audio_filename, transData.duration_seconds || state.recordingSeconds);
   } catch (err) {

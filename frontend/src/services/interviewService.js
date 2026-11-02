@@ -58,15 +58,15 @@ export const interviewService = {
     return await api.post(`/api/interviews/${interviewId}/start`);
   },
 
-  async transcribeAudio(interviewId, audioBlob, fallbackText = '', questionContext = '') {
+  async transcribeAudio(interviewId, audioBlob) {
     const formData = new FormData();
-    formData.append('file', audioBlob, 'recording.webm');
-    if (fallbackText) {
-      formData.append('fallback_text', fallbackText);
-    }
-    if (questionContext) {
-      formData.append('question_context', questionContext);
-    }
+    const mimeType = (audioBlob.type || '').toLowerCase();
+    const extension = mimeType.includes('webm') ? 'webm'
+      : mimeType.includes('ogg') ? 'ogg'
+        : mimeType.includes('wav') ? 'wav'
+          : mimeType.includes('mpeg') || mimeType.includes('mp3') ? 'mp3'
+            : mimeType.includes('mp4') ? 'm4a' : 'webm';
+    formData.append('file', audioBlob, `recording.${extension}`);
     return await api.post(`/api/interviews/${interviewId}/transcribe`, formData);
   },
 

@@ -49,6 +49,7 @@ export function InterviewSession() {
   const silenceCheckRef = useRef(null);
   const audioContextRef = useRef(null);
   const hasSpokenRef = useRef(false);
+  const recordingStartedAtRef = useRef(null);
   const expressionLabelRef = useRef('Not Detected');
   const expressionHistoryRef = useRef([]);
   const ttsSequenceRef = useRef(0);
@@ -382,7 +383,13 @@ export function InterviewSession() {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       audioChunksRef.current = [];
       hasSpokenRef.current = false;
-      const mediaRecorder = new MediaRecorder(stream);
+      const supportedMimeType = typeof MediaRecorder.isTypeSupported === 'function' ? [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/mp4',
+        'audio/ogg;codecs=opus',
+      ].find((mimeType) => MediaRecorder.isTypeSupported(mimeType)) : undefined;
+      const mediaRecorder = new MediaRecorder(stream, supportedMimeType ? { mimeType: supportedMimeType } : undefined);
       mediaRecorderRef.current = mediaRecorder;
 
       mediaRecorder.ondataavailable = (event) => {
@@ -392,19 +399,25 @@ export function InterviewSession() {
       };
 
       mediaRecorder.onstop = async () => {
+        const recordedDuration = recordingStartedAtRef.current === null
+          ? 0
+          : (performance.now() - recordingStartedAtRef.current) / 1000;
+        recordingStartedAtRef.current = null;
         if (silenceCheckRef.current) clearInterval(silenceCheckRef.current);
         if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
         if (audioContextRef.current) {
           await audioContextRef.current.close().catch(() => {});
           audioContextRef.current = null;
         }
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const recordedMimeType = mediaRecorder.mimeType || audioChunksRef.current.find((chunk) => chunk.type)?.type || 'audio/webm';
+        const audioBlob = new Blob(audioChunksRef.current, { type: recordedMimeType });
         // Close audio track
         stream.getTracks().forEach(track => track.stop());
-        await processSpokenAnswer(audioBlob);
+        await processSpokenAnswer(audioBlob, recordedDuration);
       };
 
       mediaRecorder.start(250);
+      recordingStartedAtRef.current = performance.now();
       setIsRecording(true);
       isRecordingRef.current = true;
       setRecordingSeconds(0);
@@ -455,22 +468,22 @@ export function InterviewSession() {
   };
 
   // 5. Submit and Evaluate Spoken/Typed Answer
-  const processSpokenAnswer = async (audioBlob) => {
+  const processSpokenAnswer = async (audioBlob, recordedDuration) => {
     if (sessionCompleted || (timeLeft !== null && timeLeft <= 0) || isCompletingRef.current) {
       return;
     }
     setIsProcessingAnswer(true);
     try {
       // Step 1: Transcribe
-      const transData = await interviewService.transcribeAudio(id, audioBlob, '', currentQuestion?.question || '');
+      const transData = await interviewService.transcribeAudio(id, audioBlob);
       const finalTranscript = (transData.transcript || '').trim();
-      if (!finalTranscript) {
+      if (transData.transcription_status !== 'completed' || !finalTranscript) {
         throw new Error('The answer could not be transcribed. Please try answering again.');
       }
       setTranscript(finalTranscript);
 
       // Step 2: Submit & Multi-modal Evaluate
-      await submitAnswerToEngine(finalTranscript, transData.audio_filename, transData.duration_seconds || recordingSeconds);
+      await submitAnswerToEngine(finalTranscript, transData.audio_filename, recordedDuration || transData.duration_seconds || recordingSeconds);
     } catch (err) {
       if (err.message && err.message.toLowerCase().includes('expired')) {
         handleExpireAndComplete();

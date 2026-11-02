@@ -56,7 +56,7 @@ export function AdminDashboard() {
   const summary = useMemo(() => {
     if (!dashboard) return null;
     return {
-      totalCandidates: analytics?.total_candidates ?? 0,
+      totalCandidates: dashboard.total ?? 0,
       candidates: dashboard.items ?? [],
       totalPages: dashboard.total_pages ?? 0,
     };
@@ -67,15 +67,16 @@ export function AdminDashboard() {
     if (selectedCandidateId) {
       return points
         .filter((point) => String(point.candidate_id) === selectedCandidateId)
-        .map((point) => ({ ...point, label: `Interview ${point.interview_number}` }));
+        .map((point) => ({ ...point, label: point.date || `Interview ${point.interview_number}` }));
     }
 
     const averages = new Map();
     points.forEach((point) => {
-      const current = averages.get(point.interview_number) || { label: `Interview ${point.interview_number}`, scoreTotal: 0, count: 0 };
+      const label = point.date || `Interview ${point.interview_number}`;
+      const current = averages.get(label) || { label, scoreTotal: 0, count: 0 };
       current.scoreTotal += point.score;
       current.count += 1;
-      averages.set(point.interview_number, current);
+      averages.set(label, current);
     });
     return [...averages.values()].map((point) => ({
       label: point.label,
@@ -110,19 +111,19 @@ export function AdminDashboard() {
             </div>
             <div className="stat-card">
               <span className="stat-title">Total Interviews: </span>
-              <strong className="stat-value">{analytics?.total_interviews ?? 0}</strong>
+              <strong className="stat-value">{analytics?.total_interviews ?? 'N/A'}</strong>
             </div>
             <div className="stat-card">
               <span className="stat-title">Average Candidate Score: </span>
-              <strong className="stat-value">{analytics?.average_score ?? 0}%</strong>
+              <strong className="stat-value">{analytics?.average_score !== null && analytics?.average_score !== undefined ? `${analytics.average_score}%` : 'N/A'}</strong>
             </div>
             <div className="stat-card">
               <span className="stat-title">Highest Score: </span>
-              <strong className="stat-value">{analytics?.highest_score ?? 0}%</strong>
+              <strong className="stat-value">{analytics?.highest_score !== null && analytics?.highest_score !== undefined ? `${analytics.highest_score}%` : 'N/A'}</strong>
             </div>
             <div className="stat-card">
               <span className="stat-title">Average Improvement: </span>
-              <strong className="stat-value">{analytics?.average_improvement ?? 0}%</strong>
+              <strong className="stat-value">{analytics?.average_improvement !== null && analytics?.average_improvement !== undefined ? `${analytics.average_improvement} percentage points` : 'N/A'}</strong>
             </div>
             <div className="stat-card">
               <span className="stat-title">Active Candidates: </span>
@@ -148,14 +149,14 @@ export function AdminDashboard() {
               </div>
             </div>
 
-            <div className="form-group" style={{ maxWidth: '420px', marginTop: '1rem' }}>
+            {/* <div className="form-group" style={{ maxWidth: '420px', marginTop: '1rem' }}>
               <input
                 type="text"
                 value={search}
                 onChange={handleSearch}
                 placeholder="Search candidate by name or email"
               />
-            </div>
+            </div> */}
 
             {summary?.candidates?.length ? (
               <div style={{ overflowX: 'auto', marginTop: '1rem' }}>
@@ -167,7 +168,7 @@ export function AdminDashboard() {
                       <th style={{ textAlign: 'left', padding: '0.75rem', borderBottom: '1px solid #e2e8f0' }}>Interviews</th>
                       <th style={{ textAlign: 'left', padding: '0.75rem', borderBottom: '1px solid #e2e8f0' }}>Avg Score</th>
                       <th style={{ textAlign: 'left', padding: '0.75rem', borderBottom: '1px solid #e2e8f0' }}>Best Score</th>
-                      <th style={{ textAlign: 'left', padding: '0.75rem', borderBottom: '1px solid #e2e8f0' }}>Improvement</th>
+                      <th style={{ textAlign: 'left', padding: '0.75rem', borderBottom: '1px solid #e2e8f0' }}>Improvement (pp)</th>
                       <th style={{ textAlign: 'left', padding: '0.75rem', borderBottom: '1px solid #e2e8f0' }}>Action</th>
                     </tr>
                   </thead>
@@ -177,9 +178,9 @@ export function AdminDashboard() {
                         <td style={{ padding: '0.75rem', borderBottom: '1px solid var(--table-row-border)' }}>{candidate.name}</td>
                         <td style={{ padding: '0.75rem', borderBottom: '1px solid var(--table-row-border)' }}>{candidate.email}</td>
                         <td style={{ padding: '0.75rem', borderBottom: '1px solid var(--table-row-border)' }}>{candidate.interviews}</td>
-                        <td style={{ padding: '0.75rem', borderBottom: '1px solid var(--table-row-border)' }}>{candidate.avg_score ?? 0}%</td>
-                        <td style={{ padding: '0.75rem', borderBottom: '1px solid var(--table-row-border)' }}>{candidate.best_score ?? 0}%</td>
-                        <td style={{ padding: '0.75rem', borderBottom: '1px solid var(--table-row-border)' }}>{candidate.improvement ?? 0}%</td>
+                        <td style={{ padding: '0.75rem', borderBottom: '1px solid var(--table-row-border)' }}>{candidate.avg_score !== null && candidate.avg_score !== undefined ? `${candidate.avg_score}%` : 'N/A'}</td>
+                        <td style={{ padding: '0.75rem', borderBottom: '1px solid var(--table-row-border)' }}>{candidate.best_score !== null && candidate.best_score !== undefined ? `${candidate.best_score}%` : 'N/A'}</td>
+                        <td style={{ padding: '0.75rem', borderBottom: '1px solid var(--table-row-border)' }}>{candidate.improvement !== null && candidate.improvement !== undefined ? `${candidate.improvement > 0 ? '+' : ''}${candidate.improvement}` : 'N/A'}</td>
                         <td style={{ padding: '0.75rem', borderBottom: '1px solid var(--table-row-border)' }}>
                           <Link to={`/admin/candidates/${candidate.id}`} className="btn btn-secondary btn-sm">View Details</Link>
                         </td>

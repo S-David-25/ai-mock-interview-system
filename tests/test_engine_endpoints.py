@@ -1,5 +1,10 @@
 import unittest
 import io
+import math
+import struct
+import tempfile
+import wave
+from pathlib import Path
 from unittest.mock import patch
 from fpdf import FPDF
 from starlette.testclient import TestClient
@@ -22,6 +27,19 @@ def create_sample_pdf_bytes(text: str) -> bytes:
     if isinstance(out, (bytes, bytearray)):
         return bytes(out)
     return out.encode('latin-1')
+
+
+def create_test_wav_bytes(duration_seconds: float = 1.0) -> bytes:
+    sample_rate = 16000
+    frames = int(sample_rate * duration_seconds)
+    samples = (struct.pack('<h', int(5000 * math.sin(2 * math.pi * 440 * index / sample_rate))) for index in range(frames))
+    audio = io.BytesIO()
+    with wave.open(audio, 'wb') as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(sample_rate)
+        wav_file.writeframes(b''.join(samples))
+    return audio.getvalue()
 
 class TestInterviewEngineEndpoints(unittest.TestCase):
     @classmethod
@@ -177,7 +195,7 @@ class TestInterviewEngineEndpoints(unittest.TestCase):
         }, headers=self.headers2)
         self.assertEqual(res_unauth_ans.status_code, 404)
 
-    def test_03_transcription_falls_back_to_submitted_text_when_whisper_is_empty(self):
+    def test_03_empty_whisper_result_does_not_use_submitted_fallback_text(self):
         res_create = self.client.post("/api/interviews", json={"interview_type": "general"}, headers=self.headers1)
         interview_id = res_create.json()["id"]
         fallback_text = "I designed the service using FastAPI and deployed the API with Docker on AWS."
@@ -186,18 +204,148 @@ class TestInterviewEngineEndpoints(unittest.TestCase):
             def transcribe(self, path, **kwargs):
                 return {"text": ""}
 
-        sample_audio = io.BytesIO(b"fake wav audio header and speech data")
-        with patch("app.services.transcription_service._whisper_available", True), patch("app.services.transcription_service._whisper_model", EmptyWhisper()):
-            resp = self.client.post(
-                f"/api/interviews/{interview_id}/transcribe",
-                data={"fallback_text": fallback_text, "question_context": "Explain your architecture."},
-                files={"file": ("recording.wav", sample_audio, "audio/wav")},
+        with tempfile.TemporaryDirectory() as audio_dir:
+            with patch("app.services.transcription_service.AUDIO_UPLOAD_DIR", Path(audio_dir)), \
+                 patch("app.services.transcription_service._whisper_available", True), \
+                 patch("app.services.transcription_service._whisper_model", EmptyWhisper()):
+                resp = self.client.post(
+                    f"/api/interviews/{interview_id}/transcribe",
+                    data={"fallback_text": fallback_text, "question_context": "Explain your architecture."},
+                    files={"file": ("recording.wav", create_test_wav_bytes(), "audio/wav")},
+                    headers=self.headers1,
+                )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["transcript"], "")
+        self.assertEqual(resp.json()["transcription_status"], "failed")
+        self.assertEqual(resp.json()["word_count"], 0)
+
+    def test_04_whisper_transcript_is_untranslated_and_preserved_verbatim(self):
+        res_create = self.client.post("/api/interviews", json={"interview_type": "general"}, headers=self.headers1)
+        interview_id = res_create.json()["id"]
+        expected_transcript = "I built a REST API with Python, FastAPI, and PostgreSQL in 2025."
+
+        class FaithfulWhisper:
+            def transcribe(self, path, **kwargs):
+                self.kwargs = kwargs
+                with wave.open(path, 'rb') as wav_file:
+                    self.duration = wav_file.getnframes() / wav_file.getframerate()
+                return {"text": expected_transcript}
+
+        recognizer = FaithfulWhisper()
+        with tempfile.TemporaryDirectory() as audio_dir:
+            with patch("app.services.transcription_service.AUDIO_UPLOAD_DIR", Path(audio_dir)), \
+                 patch("app.services.transcription_service._whisper_available", True), \
+                 patch("app.services.transcription_service._whisper_model", recognizer):
+                response = self.client.post(
+                    f"/api/interviews/{interview_id}/transcribe",
+                    data={"question_context": "Explain a Java system."},
+                    files={"file": ("recording.wav", create_test_wav_bytes(2.5), "audio/wav")},
+                    headers=self.headers1,
+                )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["transcript"], expected_transcript)
+        self.assertEqual(response.json()["transcription_status"], "completed")
+        self.assertEqual(response.json()["duration_seconds"], 2.5)
+        self.assertEqual(response.json()["word_count"], len(expected_transcript.split()))
+        self.assertEqual(recognizer.kwargs["language"], "en")
+        self.assertEqual(recognizer.kwargs["task"], "transcribe")
+        self.assertNotIn("initial_prompt", recognizer.kwargs)
+
+    def test_05_canonical_transcript_is_stored_and_used_for_all_evaluations(self):
+        from app.database.session import DatabaseSession
+        from app.schemas.interview import (
+            CommunicationEvaluationSchema,
+            FluencyEvaluationSchema,
+            QuestionSchema,
+            TechnicalEvaluationSchema,
+        )
+
+        created = self.client.post("/api/interviews", json={"interview_type": "general"}, headers=self.headers1)
+        interview_id = created.json()["id"]
+        with DatabaseSession() as db:
+            db.execute("UPDATE interviews SET status = 'in_progress' WHERE id = ?", (interview_id,))
+            question_cursor = db.execute(
+                "INSERT INTO interview_questions (interview_id, question_text, expected_focus_json, order_num) VALUES (?, ?, '[]', 1)",
+                (interview_id, "Describe your project."),
+            )
+            question_id = question_cursor.lastrowid
+
+        expected_transcript = "I built a REST API with Python, FastAPI, and PostgreSQL in 2025."
+        evaluated_transcripts = {}
+
+        async def evaluate_technical(**kwargs):
+            evaluated_transcripts["technical"] = kwargs["candidate_answer"]
+            return TechnicalEvaluationSchema(technical_score=80, correctness=80, relevance=80, completeness=80, depth=80, feedback="Evaluated")
+
+        async def evaluate_communication(**kwargs):
+            evaluated_transcripts["communication"] = kwargs["transcript"]
+            return CommunicationEvaluationSchema(grammar_score=80, vocabulary_score=80, clarity_score=80, communication_score=80, feedback="Evaluated")
+
+        def analyze_fluency(**kwargs):
+            evaluated_transcripts["fluency"] = kwargs["transcript"]
+            return FluencyEvaluationSchema(fluency_score=80, wpm=120, speaking_duration=8, filler_word_count=0)
+
+        async def generate_next_question(**kwargs):
+            evaluated_transcripts["question_context"] = kwargs["latest_answer"]
+            return QuestionSchema(
+                interview_id=interview_id,
+                question="What challenge did you solve?",
+                category="TECHNICAL",
+                difficulty="MEDIUM",
+                expected_focus=[],
+                source="GENERAL",
+                order_number=2,
+            ), False
+
+        with patch("app.services.interview_service.AnswerEvaluationService.evaluate_technical_answer", new=evaluate_technical), \
+             patch("app.services.interview_service.CommunicationService.evaluate_communication", new=evaluate_communication), \
+             patch("app.services.interview_service.FluencyService.analyze_fluency", new=analyze_fluency), \
+             patch("app.services.interview_service.QuestionService.generate_next_question_or_follow_up", new=generate_next_question):
+            response = self.client.post(
+                f"/api/interviews/{interview_id}/answer",
+                json={"question_id": question_id, "transcript": expected_transcript, "speaking_duration": 8},
                 headers=self.headers1,
             )
 
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json()["transcript"], fallback_text)
-        self.assertEqual(resp.json()["transcription_status"], "completed")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(set(evaluated_transcripts.values()), {expected_transcript})
+        with DatabaseSession() as db:
+            saved_answer = db.fetchone(
+                "SELECT transcript_text FROM interview_answers WHERE interview_id = ? AND question_id = ?",
+                (interview_id, question_id),
+            )
+            saved_analysis = db.fetchone(
+                "SELECT technical_score, communication_score, fluency_score FROM answer_analyses WHERE interview_id = ? AND question_id = ?",
+                (interview_id, question_id),
+            )
+        self.assertEqual(saved_answer["transcript_text"], expected_transcript)
+        self.assertEqual(saved_analysis, {"technical_score": 80.0, "communication_score": 80.0, "fluency_score": 80.0})
+
+    def test_06_whisper_provider_error_does_not_create_fallback_transcript(self):
+        res_create = self.client.post("/api/interviews", json={"interview_type": "general"}, headers=self.headers1)
+        interview_id = res_create.json()["id"]
+
+        class FailedWhisper:
+            def transcribe(self, path, **kwargs):
+                raise RuntimeError("decoder failed")
+
+        with tempfile.TemporaryDirectory() as audio_dir:
+            with patch("app.services.transcription_service.AUDIO_UPLOAD_DIR", Path(audio_dir)), \
+                 patch("app.services.transcription_service._whisper_available", True), \
+                 patch("app.services.transcription_service._whisper_model", FailedWhisper()):
+                response = self.client.post(
+                    f"/api/interviews/{interview_id}/transcribe",
+                    data={"fallback_text": "This answer was not spoken."},
+                    files={"file": ("recording.wav", create_test_wav_bytes(), "audio/wav")},
+                    headers=self.headers1,
+                )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["transcript"], "")
+        self.assertEqual(response.json()["transcription_status"], "failed")
+        self.assertIn("Whisper transcription failed", response.json()["transcription_error"])
 
 if __name__ == "__main__":
     unittest.main()

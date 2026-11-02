@@ -331,12 +331,14 @@ class PerformanceReportService:
             interview_id=interview_id,
             user_id=user_id,
             score_data=score_data,
-            skill_match=None,
+            skill_match=skill_match,
             weaknesses=weaknesses,
             mistakes=[m.dict() for m in mistakes],
             job_role=interview.job_role,
             previous_scores=previous_scores,
-            question_evidence=[q.dict() for q in question_breakdowns]
+            question_evidence=[q.dict() for q in question_breakdowns],
+            jd_profile=jd_profile,
+            resume_profile=resume_profile
         )
 
         summary_text = (
@@ -414,7 +416,7 @@ class PerformanceReportService:
                 json.dumps(areas_of_improvement),
                 json.dumps(resume_profile.dict() if resume_profile else {}),
                 json.dumps(jd_profile.dict() if jd_profile else {}),
-                json.dumps([p.dict() for p in roadmap_response.phases])
+                json.dumps(roadmap_response.dict())
             )
         )
 
@@ -492,15 +494,19 @@ class PerformanceReportService:
                 unavailable_modalities=score_data[4]
             )
 
-            roadmap_phases = json.loads(rep_row["roadmap_json"] or "[]")
-            roadmap_resp = RoadmapResponse(
-                interview_id=interview_id,
-                user_id=user_id,
-                overall_score=rep_row["overall_score"],
-                readiness_level=rep_row["readiness_level"],
-                phases=roadmap_phases,
-                created_at=rep_row["created_at"]
-            )
+            roadmap_payload = json.loads(rep_row["roadmap_json"] or "[]")
+            if isinstance(roadmap_payload, dict):
+                roadmap_payload["created_at"] = roadmap_payload.get("created_at") or rep_row["created_at"]
+                roadmap_resp = RoadmapResponse(**roadmap_payload)
+            else:
+                roadmap_resp = RoadmapResponse(
+                    interview_id=interview_id,
+                    user_id=user_id,
+                    overall_score=rep_row["overall_score"],
+                    readiness_level=rep_row["readiness_level"],
+                    phases=roadmap_payload,
+                    created_at=rep_row["created_at"]
+                )
 
             return PerformanceReportResponse(
                 interview_id=interview_id,
