@@ -274,12 +274,19 @@ class RoadmapItemSchema(BaseModel):
     measurable_target: str
     evidence_summary: Optional[str] = None
     learning_resources: List[Dict[str, str]] = []
+    gap_status: Optional[str] = None
+    jd_requirement: Optional[str] = None
+    candidate_evidence: Optional[str] = None
+    learning_outcomes: List[str] = Field(default_factory=list)
+    study_plan: List[Dict[str, Any]] = Field(default_factory=list)
+    assessment_criteria: List[str] = Field(default_factory=list)
 
 class RoadmapPhaseSchema(BaseModel):
     phase_number: int
     phase_title: str
     focus_objective: str
     items: List[RoadmapItemSchema]
+    estimated_duration_days: Optional[int] = None
 
 class RoadmapResponse(BaseModel):
     interview_id: int
@@ -288,6 +295,11 @@ class RoadmapResponse(BaseModel):
     readiness_level: str
     phases: List[RoadmapPhaseSchema]
     created_at: str
+    target_role: Optional[str] = None
+    overall_learning_objective: Optional[str] = None
+    jd_specific: Optional[bool] = None
+    baseline_metrics: Dict[str, Any] = Field(default_factory=dict)
+    reassessment_plan: Dict[str, Any] = Field(default_factory=dict)
 
 class PerformanceReportResponse(BaseModel):
     interview_id: int

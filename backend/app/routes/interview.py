@@ -290,14 +290,12 @@ def start_interview(
 async def transcribe_audio(
     interview_id: int,
     file: UploadFile = File(...),
-    fallback_text: Optional[str] = Form(None),
-    question_context: Optional[str] = Form(None),
     current_user: User = Depends(get_current_candidate_user),
     db: DatabaseSession = Depends(get_db)
 ):
     """Uploads audio recording and transcribes it into text via Whisper."""
     InterviewService.get_interview_by_id(db, interview_id, current_user.id)
-    return await TranscriptionService.save_and_transcribe_audio(file, fallback_text or "", question_context or "")
+    return await TranscriptionService.save_and_transcribe_audio(file)
 
 @router.post("/interviews/{interview_id}/answer", response_model=AnswerSubmitResponse)
 async def submit_answer(

@@ -123,3 +123,16 @@ $$\text{Overall Improvement } \Delta = S_{overall}(I_N) - S_{overall}(I_1)$$
 $$\text{Session-over-Session Delta } \Delta_{recent} = S_{overall}(I_N) - S_{overall}(I_{N-1})$$
 $$\text{Dimension Delta } \Delta_{dim} = S_{dim}(I_N) - S_{dim}(I_1)$$
 $$\text{Trajectory Classification} = \begin{cases} \text{Improved} & \text{if } \Delta > 0 \\ \text{Declined} & \text{if } \Delta < 0 \\ \text{Unchanged} & \text{if } \Delta = 0 \end{cases}$$
+
+## 5. Session-Specific Improvement Roadmap
+
+The roadmap uses the JD profile, resume profile, skill-match result, question-level evaluations, and available performance dimensions stored on the selected interview. Its priority order is:
+
+1. JD skills with a directly related evaluated answer below 70%.
+2. JD skills identified as missing by resume-to-JD matching.
+3. JD skills that have not yet been assessed.
+4. Communication or fluency practice only when the corresponding dimension or recorded mistake supports it.
+
+An unassessed competency is labelled `not_assessed`, not a failure. A strong question-level result is not relabelled as a weakness, and an overall technical score alone does not establish a skill-specific gap. When no usable JD profile or JD-derived skill match exists, the response sets `jd_specific` to `false` and the UI explicitly identifies the plan as general.
+
+Each roadmap preserves the five-phase response contract and adds optional evidence status, JD requirement, learning outcomes, official-resource links, day-wise activities, assessment criteria, baseline metrics, and reassessment guidance. New roadmap metadata is stored with the existing report JSON; historical phase-array records remain readable.

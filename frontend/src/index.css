@@ -2390,6 +2390,10 @@ body {
   gap: 1.25rem;
 }
 
+.admin-analytics-section {
+  margin-top: 1.5rem;
+}
+
 .admin-chart-card {
   min-width: 0;
   padding: 1.25rem;
@@ -2414,6 +2418,49 @@ body {
   width: 100%;
   height: 260px;
   margin-top: 0.9rem;
+}
+
+.admin-chart-scroll {
+  max-height: 390px;
+  overflow: auto;
+}
+
+.admin-chart-canvas-scroll {
+  margin-top: 0.5rem;
+}
+
+.performance-change-card {
+  align-self: start;
+}
+
+.performance-change-values {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.performance-change-values div {
+  min-width: 0;
+  padding-left: 0.75rem;
+  border-left: 2px solid var(--primary);
+}
+
+.performance-change-values span,
+.performance-change-values strong {
+  display: block;
+}
+
+.performance-change-values span {
+  margin-bottom: 0.35rem;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.performance-change-values strong {
+  color: var(--text-primary);
+  font-size: 0.95rem;
+  overflow-wrap: anywhere;
 }
 
 .admin-chart-filter {
@@ -2812,6 +2859,10 @@ body {
 @media (max-width: 540px) {
   .admin-chart-heading {
     flex-direction: column;
+  }
+
+  .performance-change-values {
+    grid-template-columns: 1fr;
   }
 
   .admin-chart-filter,

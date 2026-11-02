@@ -302,6 +302,14 @@ export function InterviewReport() {
             <p className="section-subtext">
               Actionable, measurable milestones tailored to close your identified skill gaps and elevate placement drive performance.
             </p>
+            <p className="roadmap-evidence">
+              {report.roadmap.jd_specific
+                ? `JD-specific plan for ${report.roadmap.target_role || report.job_role || 'the target role'}.`
+                : report.roadmap.jd_specific === false
+                  ? 'General interview-evidence plan: no readable JD requirements were available for specific targeting.'
+                  : 'Interview roadmap based on the evidence available for this session.'}
+              {report.roadmap.overall_learning_objective && ` ${report.roadmap.overall_learning_objective}`}
+            </p>
 
             <div className="roadmap-timeline">
               {report.roadmap.phases.map((phase) => (
@@ -319,14 +327,39 @@ export function InterviewReport() {
                           <h4 className="item-area">{item.area}</h4>
                           <span className={`priority-badge ${item.priority.toLowerCase()}`}>{item.priority} Priority</span>
                         </div>
-                        <p><strong>Identified Gap:</strong> {item.problem}</p>
+                        <p><strong>Evidence status:</strong> {item.problem}</p>
+                        {item.jd_requirement && <p><strong>JD requirement:</strong> {item.jd_requirement}</p>}
                         <p><strong>Recommended Action:</strong> {item.recommended_action}</p>
+                        {item.learning_outcomes?.length > 0 && (
+                          <div>
+                            <strong>Learning outcomes:</strong>
+                            <ul>{item.learning_outcomes.map((outcome, outcomeIdx) => <li key={outcomeIdx}>{outcome}</li>)}</ul>
+                          </div>
+                        )}
+                        {item.study_plan?.length > 0 && (
+                          <div>
+                            <strong>Study plan:</strong>
+                            <ul>
+                              {item.study_plan.map((step, stepIdx) => (
+                                <li key={stepIdx}>
+                                  {step.day ? `Day ${step.day}: ` : ''}{step.activity}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
                         <div className="practice-task-box">
                           <strong>🛠️ Practice Task ({item.estimated_duration}):</strong> {item.practice_task}
                         </div>
                         <div className="measurable-target-box">
                           <strong>🎯 Target Milestone:</strong> {item.measurable_target}
                         </div>
+                        {item.assessment_criteria?.length > 0 && (
+                          <div>
+                            <strong>Assessment criteria:</strong>
+                            <ul>{item.assessment_criteria.map((criterion, criterionIdx) => <li key={criterionIdx}>{criterion}</li>)}</ul>
+                          </div>
+                        )}
                         {item.evidence_summary && <p className="roadmap-evidence"><strong>Evidence:</strong> {item.evidence_summary}</p>}
                         {item.learning_resources?.length > 0 && (
                           <ul className="resource-list">

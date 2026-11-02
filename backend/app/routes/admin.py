@@ -195,23 +195,19 @@ def get_admin_dashboard(current_user: User = Depends(get_current_admin_user), db
         "SELECT AVG(COALESCE(s.overall_score, i.overall_score)) as avg_score FROM interviews i JOIN users u ON u.id = i.user_id AND u.role = 'candidate' LEFT JOIN interview_scores s ON s.interview_id = i.id WHERE i.status = 'completed' AND COALESCE(s.overall_score, i.overall_score) IS NOT NULL",
         ()
     )
-    average_score = round(float(avg_score_row["avg_score"] or 0.0), 1) if avg_score_row and avg_score_row.get("avg_score") is not None else 0.0
+    average_score = round(float(avg_score_row["avg_score"]), 1) if avg_score_row and avg_score_row.get("avg_score") is not None else None
 
     highest_score_row = db.fetchone(
         "SELECT MAX(COALESCE(s.overall_score, i.overall_score)) as max_score FROM interviews i JOIN users u ON u.id = i.user_id AND u.role = 'candidate' LEFT JOIN interview_scores s ON s.interview_id = i.id WHERE i.status = 'completed' AND COALESCE(s.overall_score, i.overall_score) IS NOT NULL",
         ()
     )
-    highest_score = round(float(highest_score_row["max_score"] or 0.0), 1) if highest_score_row and highest_score_row.get("max_score") is not None else 0.0
+    highest_score = round(float(highest_score_row["max_score"]), 1) if highest_score_row and highest_score_row.get("max_score") is not None else None
 
-    improvement_values = []
     active_candidates = 0
     for candidate in candidate_rows:
         progress = ProgressAnalyticsService.get_user_progress(db, candidate["id"])
         if progress.interview_count > 0:
             active_candidates += 1
-        improvement_values.append(float(progress.total_score_improvement or 0.0))
-
-    average_improvement = round(sum(improvement_values) / len(improvement_values), 1) if improvement_values else 0.0
 
     candidate_summaries = []
     for candidate in candidate_rows:
@@ -221,20 +217,24 @@ def get_admin_dashboard(current_user: User = Depends(get_current_admin_user), db
             (candidate_id,)
         )
         score_rows = db.fetchall(
-            "SELECT i.id, COALESCE(s.overall_score, i.overall_score) AS overall_score, i.created_at FROM interviews i LEFT JOIN interview_scores s ON s.interview_id = i.id WHERE i.user_id = ? AND COALESCE(s.overall_score, i.overall_score) IS NOT NULL ORDER BY i.created_at ASC",
+            "SELECT i.id, COALESCE(s.overall_score, i.overall_score) AS overall_score, i.created_at FROM interviews i LEFT JOIN interview_scores s ON s.interview_id = i.id WHERE i.user_id = ? AND i.status = 'completed' AND COALESCE(s.overall_score, i.overall_score) IS NOT NULL ORDER BY i.created_at ASC",
             (candidate_id,)
         )
-        avg_score_value = round(sum(float(r["overall_score"]) for r in score_rows) / len(score_rows), 1) if score_rows else 0.0
-        best_score_value = round(max(float(r["overall_score"]) for r in score_rows), 1) if score_rows else 0.0
-        progress = ProgressAnalyticsService.get_user_progress(db, candidate_id)
+        completed_count = db.fetchone(
+            "SELECT COUNT(*) AS count FROM interviews WHERE user_id = ? AND status = 'completed'",
+            (candidate_id,)
+        )
+        avg_score_value = round(sum(float(r["overall_score"]) for r in score_rows) / len(score_rows), 1) if score_rows else None
+        best_score_value = round(max(float(r["overall_score"]) for r in score_rows), 1) if score_rows else None
         candidate_summaries.append({
             "id": candidate_id,
             "name": candidate["name"],
             "email": candidate["email"],
             "interviews": len(interviews),
+            "completed_interviews": int((completed_count or {}).get("count", 0) or 0),
             "avg_score": avg_score_value,
             "best_score": best_score_value,
-            "improvement": float(progress.total_score_improvement or 0.0),
+            "improvement": round(float(score_rows[-1]["overall_score"]) - float(score_rows[0]["overall_score"]), 1) if len(score_rows) > 1 else None,
             "last_interview": interviews[0]["created_at"] if interviews else None,
         })
 
@@ -272,6 +272,16 @@ def get_admin_dashboard(current_user: User = Depends(get_current_admin_user), db
     interview_activity = {}
     progression_counts = {}
     score_progression = []
+    candidate_scores = {}
+
+    completed_activity_rows = db.fetchall(
+        "SELECT i.created_at FROM interviews i JOIN users u ON u.id = i.user_id AND u.role = 'candidate' WHERE i.status = 'completed'",
+        ()
+    )
+    for row in completed_activity_rows:
+        date = str(row.get("created_at") or "")[:10]
+        if date:
+            interview_activity[date] = interview_activity.get(date, 0) + 1
 
     for row in completed_scores:
         overall = float(row["overall_score"] or 0.0)
@@ -288,11 +298,9 @@ def get_admin_dashboard(current_user: User = Depends(get_current_admin_user), db
         score_ranges[score_bucket]["count"] += 1
 
         date = str(row.get("created_at") or "")[:10]
-        if date:
-            interview_activity[date] = interview_activity.get(date, 0) + 1
-
         candidate_id = int(row["candidate_id"])
         progression_counts[candidate_id] = progression_counts.get(candidate_id, 0) + 1
+        candidate_scores.setdefault(candidate_id, []).append(overall)
         score_progression.append({
             "candidate_id": candidate_id,
             "candidate_name": row["candidate_name"],
@@ -309,10 +317,13 @@ def get_admin_dashboard(current_user: User = Depends(get_current_admin_user), db
     category_performance = [
         {
             "dimension": label,
-            "score": round(sum(category_totals[field]) / len(category_totals[field]), 1) if category_totals[field] else 0.0,
+            "score": round(sum(category_totals[field]) / len(category_totals[field]), 1),
         }
         for label, field in category_fields
+        if category_totals[field]
     ]
+    improvement_values = [scores[-1] - scores[0] for scores in candidate_scores.values() if len(scores) > 1]
+    average_improvement = round(sum(improvement_values) / len(improvement_values), 1) if improvement_values else None
 
     return {
         "total_candidates": total_candidates,
@@ -362,19 +373,18 @@ def get_admin_candidates(
     for candidate in candidate_rows:
         candidate_id = candidate["id"]
         interviews = db.fetchall(
-            "SELECT i.id, i.created_at, COALESCE(s.overall_score, i.overall_score) AS overall_score FROM interviews i LEFT JOIN interview_scores s ON s.interview_id = i.id WHERE i.user_id = ? ORDER BY i.created_at DESC",
+            "SELECT i.id, i.created_at, i.status, COALESCE(s.overall_score, i.overall_score) AS overall_score FROM interviews i LEFT JOIN interview_scores s ON s.interview_id = i.id WHERE i.user_id = ? ORDER BY i.created_at DESC",
             (candidate_id,)
         )
-        raw_scores = [float(i["overall_score"]) for i in interviews if i.get("overall_score") is not None]
-        progress = ProgressAnalyticsService.get_user_progress(db, candidate_id)
+        raw_scores = [float(i["overall_score"]) for i in interviews if i["status"] == "completed" and i.get("overall_score") is not None]
         summaries.append({
             "id": candidate_id,
             "name": candidate["name"],
             "email": candidate["email"],
             "interviews": len(interviews),
-            "avg_score": round(sum(raw_scores) / len(raw_scores), 1) if raw_scores else 0.0,
-            "best_score": round(max(raw_scores), 1) if raw_scores else 0.0,
-            "improvement": float(progress.total_score_improvement or 0.0),
+            "avg_score": round(sum(raw_scores) / len(raw_scores), 1) if raw_scores else None,
+            "best_score": round(max(raw_scores), 1) if raw_scores else None,
+            "improvement": round(raw_scores[-1] - raw_scores[0], 1) if len(raw_scores) > 1 else None,
             "last_interview": interviews[0]["created_at"] if interviews else None,
         })
 
@@ -396,6 +406,53 @@ def get_admin_candidate_detail(candidate_id: int, current_user: User = Depends(g
     progress = ProgressAnalyticsService.get_user_progress(db, candidate_id)
     interviews = db.fetchall("SELECT * FROM interviews WHERE user_id = ? ORDER BY created_at DESC", (candidate_id,))
     raw_scores = [float(i["overall_score"]) for i in interviews if i.get("overall_score") is not None]
+    analytics_interviews = db.fetchall(
+        """
+        SELECT i.id AS interview_id, i.created_at AS date,
+               COALESCE(s.overall_score, i.overall_score) AS overall_score,
+               s.technical_score, s.communication_score, s.fluency_score,
+               s.eye_contact_score, s.posture_score, s.expression_score
+        FROM interviews i
+        LEFT JOIN interview_scores s ON s.interview_id = i.id
+        WHERE i.user_id = ? AND i.status = 'completed'
+        ORDER BY i.created_at ASC, i.id ASC
+        """,
+        (candidate_id,)
+    )
+    question_rows = db.fetchall(
+        """
+        SELECT q.interview_id, q.id AS question_id, q.order_num,
+               AVG(an.technical_score) AS technical_score,
+               AVG(an.communication_score) AS communication_score,
+               AVG(an.fluency_score) AS fluency_score
+        FROM interview_questions q
+        JOIN interviews i ON i.id = q.interview_id
+        LEFT JOIN interview_answers a ON a.question_id = q.id
+        LEFT JOIN answer_analyses an ON an.answer_id = a.id
+        WHERE i.user_id = ? AND i.status = 'completed'
+        GROUP BY q.interview_id, q.id, q.order_num
+        ORDER BY q.interview_id ASC, q.order_num ASC
+        """,
+        (candidate_id,)
+    )
+    questions_by_interview = {}
+    for row in question_rows:
+        question = {
+            "question_id": row["question_id"],
+            "order_num": row["order_num"],
+            "technical_score": row.get("technical_score"),
+            "communication_score": row.get("communication_score"),
+            "fluency_score": row.get("fluency_score"),
+        }
+        if any(question[key] is not None for key in ("technical_score", "communication_score", "fluency_score")):
+            questions_by_interview.setdefault(row["interview_id"], []).append(question)
+
+    interview_numbers = {row["interview_id"]: index for index, row in enumerate(analytics_interviews, start=1)}
+    for interview in analytics_interviews:
+        interview["interview_number"] = interview_numbers[interview["interview_id"]]
+        interview["question_scores"] = questions_by_interview.get(interview["interview_id"], [])
+    scored_analytics_interviews = [item for item in analytics_interviews if item.get("overall_score") is not None]
+    completed_scores = [float(item["overall_score"]) for item in scored_analytics_interviews]
 
     return {
         "candidate": {
@@ -406,14 +463,15 @@ def get_admin_candidate_detail(candidate_id: int, current_user: User = Depends(g
             "role": "candidate",
         },
         "performance": {
-            "interviews": progress.interview_count,
-            "average_score": progress.average_score,
-            "best_score": progress.best_score,
-            "latest_score": progress.latest_score,
-            "improvement": progress.total_score_improvement,
+            "interviews": len(analytics_interviews),
+            "average_score": round(sum(completed_scores) / len(completed_scores), 1) if completed_scores else None,
+            "best_score": round(max(completed_scores), 1) if completed_scores else None,
+            "latest_score": completed_scores[-1] if completed_scores else None,
+            "improvement": round(completed_scores[-1] - completed_scores[0], 1) if len(completed_scores) > 1 else None,
             "last_interview_date": interviews[0]["created_at"] if interviews else None,
             "trend_data": [t.model_dump() if hasattr(t, "model_dump") else t.__dict__ for t in progress.trend_data],
             "category_trends": [t.model_dump() if hasattr(t, "model_dump") else t.__dict__ for t in progress.category_trends],
+            "analytics_interviews": analytics_interviews,
         },
     }
 

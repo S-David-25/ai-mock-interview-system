@@ -4,6 +4,7 @@ from app.schemas.interview import (
     ResumeProfileSchema,
     JDProfileSchema,
     SkillMatchSchema,
+    RoadmapResponse,
 )
 from app.services.scoring_service import MultiModalScoringService
 from app.services.roadmap_service import PersonalizedRoadmapService
@@ -109,6 +110,10 @@ class TestScoringAndReportLogic(unittest.TestCase):
             user_id=42,
             score_data=score_resp,
             skill_match=skill_match,
+            jd_profile=JDProfileSchema(
+                job_role="Backend Developer",
+                required_skills=["Spring Boot", "Kafka"],
+            ),
             weaknesses=["Needs deeper system design knowledge"],
             job_role="Backend Developer"
         )
@@ -120,9 +125,166 @@ class TestScoringAndReportLogic(unittest.TestCase):
         self.assertIn("Phase 4", roadmap.phases[3].phase_title)
         self.assertIn("Phase 5", roadmap.phases[4].phase_title)
 
-        # Verify skill gap is integrated into technical phase
-        phase2_items = roadmap.phases[1].items
-        self.assertTrue(any("Spring Boot" in item.area for item in phase2_items))
+        # JD gaps should be prioritized, not forced into a fixed phase.
+        self.assertTrue(any("Spring Boot" in item.area for phase in roadmap.phases for item in phase.items))
+        self.assertTrue(roadmap.jd_specific)
+
+    def test_06_jd_and_question_evidence_drive_priorities(self):
+        score_resp = InterviewScoreResponse(
+            interview_id=7,
+            overall_score=78.0,
+            readiness_level="Good",
+            confidence_indicator=76.0,
+            dimensions={},
+            weights_used={},
+            available_weights_sum=1.0,
+            unavailable_modalities=[]
+        )
+        roadmap = PersonalizedRoadmapService.generate_roadmap(
+            interview_id=7,
+            user_id=42,
+            score_data=score_resp,
+            jd_profile=JDProfileSchema(
+                job_role="Java Backend Engineer",
+                required_skills=["Java", "Spring Boot", "REST APIs", "SQL", "Spring Boot"],
+                technologies=["Spring Boot", "PostgreSQL"],
+            ),
+            resume_profile=ResumeProfileSchema(programming_languages=["Java"], databases=["SQL"]),
+            skill_match=SkillMatchSchema(
+                matched_skills=["Java", "SQL"],
+                skill_gaps=["Spring Boot", "REST APIs"],
+                priority_skills=["Spring Boot"],
+            ),
+            question_evidence=[
+                {
+                    "order_number": 1,
+                    "question": "Explain Spring Boot dependency injection.",
+                    "candidate_answer": "Spring Boot manages dependencies.",
+                    "technical_score": 52.0,
+                    "feedback": "Explain the application context and bean lifecycle.",
+                },
+                {
+                    "order_number": 2,
+                    "question": "How do you use Java collections?",
+                    "candidate_answer": "I use maps for keyed lookups and lists for ordered values.",
+                    "technical_score": 91.0,
+                    "feedback": "Accurate explanation with a relevant example.",
+                },
+            ],
+        )
+
+        self.assertEqual(len(roadmap.phases), 5)
+        spring_item = next(
+            item for phase in roadmap.phases for item in phase.items
+            if item.area == "Spring Boot"
+        )
+        java_item = next(
+            item for phase in roadmap.phases for item in phase.items
+            if item.area == "Java"
+        )
+        self.assertEqual(spring_item.gap_status, "demonstrated_weakness")
+        self.assertEqual(java_item.gap_status, "demonstrated_strength")
+        self.assertIn("Spring Boot", spring_item.jd_requirement)
+        self.assertNotEqual(java_item.gap_status, "demonstrated_weakness")
+        self.assertTrue(spring_item.study_plan)
+        self.assertTrue(spring_item.assessment_criteria)
+        self.assertEqual(
+            sum(item.area == "Spring Boot" for phase in roadmap.phases for item in phase.items),
+            1,
+        )
+        self.assertNotIn(
+            "System Design & Concurrency Trade-offs",
+            [item.area for phase in roadmap.phases for item in phase.items],
+        )
+        restored = RoadmapResponse(**roadmap.model_dump())
+        self.assertEqual(restored.jd_specific, roadmap.jd_specific)
+        self.assertEqual(restored.phases[0].items[0].study_plan, roadmap.phases[0].items[0].study_plan)
+
+    def test_07_python_data_science_and_frontend_requirements(self):
+        score_resp = InterviewScoreResponse(
+            interview_id=8,
+            overall_score=70.0,
+            readiness_level="Good",
+            confidence_indicator=70.0,
+            dimensions={},
+            weights_used={},
+            available_weights_sum=1.0,
+            unavailable_modalities=[]
+        )
+        cases = [
+            (
+                JDProfileSchema(job_role="Data Scientist", required_skills=["Python", "pandas", "scikit-learn"]),
+                ["Python", "pandas", "scikit-learn"],
+            ),
+            (
+                JDProfileSchema(job_role="Frontend Engineer", required_skills=["React", "TypeScript", "CSS"]),
+                ["React", "TypeScript", "CSS"],
+            ),
+        ]
+        for jd_profile, expected_topics in cases:
+            with self.subTest(role=jd_profile.job_role):
+                roadmap = PersonalizedRoadmapService.generate_roadmap(
+                    interview_id=8,
+                    user_id=42,
+                    score_data=score_resp,
+                    jd_profile=jd_profile,
+                )
+                all_content = " ".join(
+                    item.area + " " + item.jd_requirement if item.jd_requirement else item.area
+                    for phase in roadmap.phases for item in phase.items
+                ).casefold()
+                self.assertEqual(len(roadmap.phases), 5)
+                self.assertTrue(roadmap.jd_specific)
+                for topic in expected_topics:
+                    self.assertIn(topic.casefold(), all_content)
+                if jd_profile.job_role == "Data Scientist":
+                    resources = [
+                        resource["url"] for phase in roadmap.phases for item in phase.items
+                        for resource in item.learning_resources
+                    ]
+                    self.assertTrue(any("python.org" in url for url in resources))
+
+    def test_08_unassessed_and_missing_jd_are_not_mislabeled(self):
+        score_resp = InterviewScoreResponse(
+            interview_id=9,
+            overall_score=70.0,
+            readiness_level="Good",
+            confidence_indicator=70.0,
+            dimensions={},
+            weights_used={},
+            available_weights_sum=1.0,
+            unavailable_modalities=[]
+        )
+        unassessed_roadmap = PersonalizedRoadmapService.generate_roadmap(
+            interview_id=9,
+            user_id=42,
+            score_data=score_resp,
+            jd_profile=JDProfileSchema(job_role="Backend Engineer", required_skills=["Kafka"]),
+            skill_match=SkillMatchSchema(matched_skills=["Kafka"]),
+        )
+        kafka_item = next(
+            item for phase in unassessed_roadmap.phases for item in phase.items
+            if item.area == "Kafka"
+        )
+        self.assertEqual(kafka_item.gap_status, "not_assessed")
+        self.assertNotEqual(kafka_item.gap_status, "demonstrated_weakness")
+
+        general_roadmap = PersonalizedRoadmapService.generate_roadmap(
+            interview_id=10,
+            user_id=42,
+            score_data=score_resp,
+            skill_match=SkillMatchSchema(
+                matched_skills=["Python", "FastAPI"],
+                priority_skills=["Python", "FastAPI"],
+            ),
+        )
+        self.assertFalse(general_roadmap.jd_specific)
+        self.assertIn("general plan", general_roadmap.overall_learning_objective.casefold())
+        self.assertEqual(general_roadmap.baseline_metrics, {})
+        self.assertEqual(general_roadmap.reassessment_plan["metric_availability"], {})
+        general_items = [item for phase in general_roadmap.phases for item in phase.items]
+        self.assertNotIn("Python", [item.area for item in general_items])
+        self.assertNotIn("JD-relevant learning", [item.problem for item in general_items])
 
 if __name__ == "__main__":
     unittest.main()
