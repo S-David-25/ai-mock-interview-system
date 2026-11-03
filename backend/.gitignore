@@ -14,3 +14,22 @@ uploads/jds/*
 .env
 venv/
 env/
+# Environment and secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+
+# Node
+node_modules/
+
+# Local databases
+*.db
+
+# Temporary files
+*.log
